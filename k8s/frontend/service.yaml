@@ -1,0 +1,107 @@
+---
+# ============================================================================
+# Frontend Service - ClusterIP
+# ============================================================================
+# Purpose: Internal DNS name for frontend pods
+# Type: ClusterIP (only accessible within cluster)
+#
+# Service Name: ems-frontend
+# Port: 80 (HTTP)
+# Internal DNS: ems-frontend.dev.svc.cluster.local
+#
+# Apply: kubectl apply -f k8s/frontend/service.yaml -n dev
+# ============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ems-frontend
+  namespace: dev
+  labels:
+    app: ems-frontend
+    component: frontend
+    managed-by: terraform
+  annotations:
+    description: "Frontend service for Nginx"
+    service.beta.kubernetes.io/aws-load-balancer-type: "internal"
+
+spec:
+  # Service type
+  type: ClusterIP
+  
+  # Cluster IP (auto-assigned or specify)
+  # clusterIP: 10.0.0.100  # Optional: specify fixed IP
+  
+  # Session affinity (optional)
+  # sessionAffinity: ClientIP
+  # sessionAffinityConfig:
+  #   clientIP:
+  #     timeoutSeconds: 10800
+  
+  # Port configuration
+  ports:
+    - name: http
+      port: 80              # Service port
+      targetPort: 80        # Container port
+      protocol: TCP
+  
+  # Pod selector
+  selector:
+    app: ems-frontend
+  
+  # Publishing not required (internal only)
+  publishNotReadyAddresses: false
+
+---
+# ============================================================================
+# ServiceAccount - For pod authentication
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ems-frontend
+  namespace: dev
+  labels:
+    app: ems-frontend
+    managed-by: terraform
+
+---
+# ============================================================================
+# Role - Permissions for service account
+# ============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ems-frontend
+  namespace: dev
+  labels:
+    app: ems-frontend
+rules:
+  # Allow reading own namespace
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  # Allow reading configmaps in namespace
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ============================================================================
+# RoleBinding - Bind role to service account
+# ============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ems-frontend
+  namespace: dev
+  labels:
+    app: ems-frontend
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ems-frontend
+subjects:
+  - kind: ServiceAccount
+    name: ems-frontend
+    namespace: dev

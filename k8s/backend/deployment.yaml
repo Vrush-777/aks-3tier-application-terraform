@@ -1,0 +1,214 @@
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Backend Deployment - Spring Boot (Java 21)
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Purpose: Deploy Spring Boot API server with rolling updates
+# 
+# Features:
+#   - Multi-replica deployment for HA
+#   - Rolling updates for zero downtime
+#   - Resource requests and limits with proper JVM tuning
+#   - Readiness and liveness probes
+#   - ConfigMap for configuration
+#   - Secret for sensitive data
+#   - Pod disruption budget
+#   - Anti-affinity for spread
+#
+# Apply: kubectl apply -f k8s/backend/deployment.yaml -n dev
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ems-backend
+  namespace: dev
+  labels:
+    app: ems-backend
+    version: v1
+    component: backend
+    managed-by: terraform
+  annotations:
+    description: "Spring Boot backend REST API server"
+
+spec:
+  # Number of replicas for HA
+  replicas: 2
+  
+  # Rolling update strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1              # Max 1 extra pod during update
+      maxUnavailable: 0        # Ensure zero downtime
+  
+  # Pod selector
+  selector:
+    matchLabels:
+      app: ems-backend
+  
+  # Pod template specification
+  template:
+    metadata:
+      name: ems-backend-pod
+      labels:
+        app: ems-backend
+        version: v1
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
+    
+    spec:
+      # Pod affinity for node spread
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ems-backend
+                topologyKey: kubernetes.io/hostname
+      
+      # Security context at pod level
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+      
+      # Service account
+      serviceAccountName: ems-backend
+      
+      # Init containers (run before main containers)
+      initContainers:
+        # Wait for database to be ready
+        - name: wait-for-db
+          image: busybox:1.35
+          command: ['sh', '-c', 'until nc -z postgres.dev.svc.cluster.local 5432; do echo waiting for postgres; sleep 2; done']
+      
+      # Containers specification
+      containers:
+        - name: spring-boot
+          image: ems-backend:latest  # Replace with registry URL
+          imagePullPolicy: Always
+          
+          # Ports
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          
+          # Container security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 250m           # Minimum CPU
+              memory: 512Mi       # Minimum memory (for JVM)
+            limits:
+              cpu: 1000m          # Maximum CPU (1 core)
+              memory: 1024Mi      # Maximum memory (1GB heap)
+          
+          # Readiness probe (when to accept traffic)
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30    # Wait for JVM startup
+            periodSeconds: 10          # Check every 10s
+            timeoutSeconds: 5          # Wait 5s for response
+            successThreshold: 1        # 1 success = ready
+            failureThreshold: 3        # 3 failures = not ready
+          
+          # Liveness probe (when to restart)
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 45    # Wait longer for JVM
+            periodSeconds: 15          # Check every 15s
+            timeoutSeconds: 5          # Wait 5s for response
+            failureThreshold: 3        # 3 failures = restart
+          
+          # Startup probe (ready for traffic checks)
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30       # Give 150 seconds total (30 * 5s)
+          
+          # Volume mounts
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-logs
+              mountPath: /app/logs
+          
+          # Environment variables from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: ems-backend-config
+            - secretRef:
+                name: ems-backend-secrets
+          
+          # Additional environment variables
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # JVM memory options
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseG1GC -XX:+ParallelRefProcEnabled"
+      
+      # Volumes
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-logs
+          emptyDir: {}
+      
+      # Termination grace period for graceful shutdown
+      terminationGracePeriodSeconds: 45
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Pod Disruption Budget - Ensure availability
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ems-backend-pdb
+  namespace: dev
+  labels:
+    app: ems-backend
+spec:
+  minAvailable: 1              # At least 1 pod must be running
+  selector:
+    matchLabels:
+      app: ems-backend

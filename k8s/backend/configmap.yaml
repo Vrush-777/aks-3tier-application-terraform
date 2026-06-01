@@ -1,0 +1,69 @@
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Backend ConfigMap - Non-sensitive configuration
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Purpose: Store non-sensitive configuration for backend service
+# 
+# Usage in deployment:
+#   envFrom:
+#     - configMapRef:
+#         name: ems-backend-config
+#
+# Apply: kubectl apply -f k8s/backend/configmap.yaml -n dev
+# 
+# Update: kubectl set env deployment/ems-backend -n dev \
+#         --from=configmap/ems-backend-config \
+#         --overwrite=true
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ems-backend-config
+  namespace: dev
+  labels:
+    app: ems-backend
+    component: backend
+    managed-by: terraform
+  annotations:
+    description: "Non-sensitive configuration for backend service"
+
+data:
+  # Database configuration
+  DB_HOST: postgres.dev.svc.cluster.local  # PostgreSQL service hostname
+  DB_PORT: "5432"                          # PostgreSQL port
+  DB_NAME: employee_dev                    # Database name
+  DB_USERNAME: postgres                    # Database username
+  
+  # Spring Boot configuration
+  SPRING_PROFILES_ACTIVE: "dev"            # Active Spring profile
+  
+  # Application configuration
+  SERVER_PORT: "8080"                      # Application port
+  SERVER_SERVLET_CONTEXT_PATH: "/"         # Context path
+  
+  # Logging configuration
+  LOG_LEVEL: "INFO"                        # Log level (DEBUG, INFO, WARN, ERROR)
+  
+  # JPA/Hibernate configuration
+  SPRING_JPA_SHOW_SQL: "false"            # Show SQL queries
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update" # Auto-update schema
+  
+  # Connection pool configuration
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "20"    # Max connections
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "5"          # Min idle connections
+  SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: "30000" # Connection timeout (ms)
+  SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT: "600000"     # Idle timeout (ms)
+  SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: "1800000"    # Max lifetime (ms)
+  
+  # Actuator endpoints
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  MANAGEMENT_ENDPOINTS_WEB_BASE_PATH: "/actuator"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "when_authorized"
+  
+  # Metrics configuration
+  MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED: "true"
+  
+  # Application-specific
+  TIMEZONE: "UTC"
+  LOCALE: "en_US"

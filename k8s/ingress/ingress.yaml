@@ -1,0 +1,213 @@
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# AGIC Ingress - Azure Application Gateway Ingress Controller
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Purpose: Route external traffic to frontend and backend services
+# 
+# Routing Rules:
+#   / (root)        → ems-frontend:80 (React SPA)
+#   /api            → ems-backend:8080 (REST API)
+#   /actuator       → ems-backend:8080 (Health/metrics)
+#
+# Prerequisites:
+#   - Azure Application Gateway deployed
+#   - AGIC controller installed in AKS cluster
+#   - Install: https://learn.microsoft.com/en-us/azure/application-gateway/ingress-controller-install-new
+#
+# Apply: kubectl apply -f k8s/ingress/ingress.yaml -n dev
+#
+# Verify:
+#   kubectl get ingress -n dev
+#   kubectl describe ingress ems-ingress -n dev
+#   kubectl logs -n kube-system -l app=ingress-azure -f
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ems-ingress
+  namespace: dev
+  labels:
+    app: ems-ingress
+    version: v1
+    managed-by: terraform
+  annotations:
+    # AGIC annotations
+    kubernetes.io/ingress.class: azure/application-gateway
+    
+    # Application Gateway specific
+    appgw.ingress.kubernetes.io/backend-protocol: "http"
+    appgw.ingress.kubernetes.io/appgw-ssl-certificate: ""  # Add if using SSL
+    
+    # Health probe configuration
+    appgw.ingress.kubernetes.io/health-probe-path: "/"
+    appgw.ingress.kubernetes.io/health-probe-interval: "30"
+    appgw.ingress.kubernetes.io/health-probe-timeout: "5"
+    appgw.ingress.kubernetes.io/health-probe-unhealthy-threshold: "3"
+    
+    # Backend configuration
+    appgw.ingress.kubernetes.io/backend-connection-timeout: "30"
+    appgw.ingress.kubernetes.io/backend-http-settings-port: "80"
+    
+    # Cookie affinity (optional - use for stateful apps)
+    # appgw.ingress.kubernetes.io/cookie-based-affinity: "Enabled"
+    # appgw.ingress.kubernetes.io/affinity-cookie-name: "ApplicationGatewayAffinity"
+    
+    # Request timeout
+    appgw.ingress.kubernetes.io/request-timeout: "60"
+    
+    # WAF (Web Application Firewall) - if enabled
+    # appgw.ingress.kubernetes.io/waf-policy: "/subscriptions/.../wafPolicy"
+    
+    # Rate limiting (if supported)
+    # appgw.ingress.kubernetes.io/rate-limit: "10"
+
+spec:
+  # Use AGIC as ingress controller
+  ingressClassName: azure-application-gateway
+  
+  # Rules for HTTP/HTTPS routing
+  rules:
+    # Rule 1: Frontend - Root path
+    - host: ""  # Empty host means all hostnames (or specify: example.com)
+      http:
+        paths:
+          # Root path routes to frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ems-frontend
+                port:
+                  number: 80
+          
+          # Exclude API paths from frontend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: ems-backend
+                port:
+                  number: 8080
+          
+          # Actuator endpoints for monitoring
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: ems-backend
+                port:
+                  number: 8080
+          
+          # Health check endpoint
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: ems-frontend
+                port:
+                  number: 80
+
+  # TLS/SSL configuration (optional)
+  # tls:
+  #   - hosts:
+  #       - example.com
+  #     secretName: ems-tls-cert  # TLS certificate in Secret
+  
+  # Backend configuration (optional - for advanced tuning)
+  # backend:
+  #   service:
+  #     name: ems-frontend
+  #     port:
+  #       number: 80
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Optional: Ingress Backend TLS (for backend HTTPS)
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Uncomment if backend uses HTTPS
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: ems-backend-ssl
+#   namespace: dev
+#   annotations:
+#     kubernetes.io/ingress.class: azure/application-gateway
+#     appgw.ingress.kubernetes.io/backend-protocol: "https"
+#     appgw.ingress.kubernetes.io/backend-ssl-certificate: |
+#       -----BEGIN CERTIFICATE-----
+#       ...
+#       -----END CERTIFICATE-----
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Optional: Azure Application Gateway Settings
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Store in Application Gateway config:
+#
+# Backend HTTP Settings:
+#   - Port: 80/8080
+#   - Protocol: HTTP
+#   - Cookie-based affinity: Disabled (unless stateful)
+#   - Connection timeout: 30 seconds
+#   - Request timeout: 60 seconds
+#   - Pick host name from backend address: No
+#   - Custom probe: /health (optional)
+#
+# Frontend IP Configuration:
+#   - Public IP: Required for external access
+#   - Private IP: For internal access only
+#
+# HTTP Listeners:
+#   - Protocol: HTTP (add HTTPS with certificate)
+#   - Port: 80 (add 443 for HTTPS)
+#   - Host name: Specify or leave empty for all
+#
+# Routing Rules:
+#   - Priority: Ensure correct order
+#   - Path-based routing: /api/* to backend
+#   - Default routing: / to frontend
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# AGIC Deployment - Verify Installation
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Check AGIC controller is running:
+#   kubectl get pods -n kube-system | grep ingress-azure
+#
+# View AGIC logs:
+#   kubectl logs -n kube-system -l app=ingress-azure -f
+#
+# Verify Ingress is recognized:
+#   kubectl get ingress -n dev
+#   kubectl describe ingress ems-ingress -n dev
+#
+# Check Application Gateway status:
+#   az network application-gateway show \
+#     --name <appgw-name> \
+#     --resource-group <rg-name>
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Production: HTTPS Configuration
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# 
+# 1. Create TLS Secret:
+#    kubectl create secret tls ems-tls-prod \
+#      --cert=path/to/cert.crt \
+#      --key=path/to/key.key \
+#      -n dev
+#
+# 2. Update Ingress:
+#    tls:
+#      - hosts:
+#          - example.com
+#        secretName: ems-tls-prod
+#
+# 3. Add HTTPS listener in Application Gateway
+# 4. Redirect HTTP to HTTPS (optional)
+#    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+#
+# 4. Use Azure Key Vault for certificate storage:
+#    appgw.ingress.kubernetes.io/appgw-ssl-certificate: \
+#      "/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{vault}/secrets/{cert}"

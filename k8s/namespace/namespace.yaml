@@ -1,0 +1,69 @@
+---
+# ============================================================================
+# Kubernetes Namespace - dev
+# ============================================================================
+# Purpose: Logical isolation for development environment
+# Features:
+#   - Resource quotas (optional, add if needed)
+#   - Network policies (optional, add if needed)
+#   - Labels for organization
+# 
+# Apply: kubectl apply -f k8s/namespace/namespace.yaml
+# ============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    name: dev
+    environment: development
+    managed-by: terraform
+  annotations:
+    description: "Development environment namespace for EMS application"
+    purpose: "Logical isolation for dev workloads"
+    
+# ============================================================================
+# Optional: ResourceQuota for namespace (uncomment to enforce limits)
+# ============================================================================
+# apiVersion: v1
+# kind: ResourceQuota
+# metadata:
+#   name: dev-quota
+#   namespace: dev
+# spec:
+#   hard:
+#     requests.cpu: "10"
+#     requests.memory: "20Gi"
+#     limits.cpu: "20"
+#     limits.memory: "40Gi"
+#     pods: "100"
+#     services: "50"
+#     persistentvolumeclaims: "10"
+
+# ============================================================================
+# Optional: NetworkPolicy for namespace isolation (uncomment to enable)
+# ============================================================================
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: dev-network-policy
+#   namespace: dev
+# spec:
+#   podSelector: {}
+#   policyTypes:
+#     - Ingress
+#     - Egress
+#   ingress:
+#     - from:
+#         - podSelector: {}
+#   egress:
+#     - to:
+#         - podSelector: {}
+#     - to:
+#         - namespaceSelector: {}
+#       ports:
+#         - protocol: TCP
+#           port: 443
+#         - protocol: TCP
+#           port: 53

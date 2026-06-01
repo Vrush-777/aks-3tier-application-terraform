@@ -1,0 +1,160 @@
+version: '3.8'
+
+# ============================================================================
+# EMS Three-Tier Application - Docker Compose Configuration
+# ============================================================================
+# Architecture:
+#   Frontend (Nginx) → Backend (Spring Boot) → PostgreSQL Database
+#
+# Features:
+#   - Multi-stage builds for optimal image sizes
+#   - Health checks for all services
+#   - Service dependencies with wait conditions
+#   - Resource limits and reservations
+#   - Environment variable configuration
+#   - Persistent database volumes
+#   - Network isolation with bridge network
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose down           # Stop and remove containers
+#   docker-compose logs -f        # View logs
+#   docker-compose ps             # List services
+# ============================================================================
+
+services:
+  # =========================================================================
+  # PostgreSQL Database Service
+  # =========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ems-postgres-db
+    restart: unless-stopped
+    networks:
+      - ems-network
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-employee_dev}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-employee_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    
+    # Resource limits (adjust based on host capacity)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # =========================================================================
+  # Spring Boot Backend Service
+  # =========================================================================
+  ems-backend:
+    build:
+      context: .
+      dockerfile: ./ems-backend/ems-backend/Dockerfile
+    container_name: ems-backend-app
+    restart: unless-stopped
+    networks:
+      - ems-network
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    
+    environment:
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-employee_dev}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      
+      # Spring Boot Configuration
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0}
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # =========================================================================
+  # React Frontend Service (Nginx)
+  # =========================================================================
+  ems-frontend:
+    build:
+      context: .
+      dockerfile: ./ems-fullstack/Dockerfile
+    container_name: ems-frontend-app
+    restart: unless-stopped
+    networks:
+      - ems-network
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    
+    # Frontend depends on backend being ready
+    depends_on:
+      ems-backend:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  ems-network:
+    driver: bridge

@@ -1,0 +1,101 @@
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Backend Service - ClusterIP
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Purpose: Internal DNS name for backend pods
+# Type: ClusterIP (only accessible within cluster)
+#
+# Service Name: ems-backend
+# Port: 8080 (HTTP)
+# Internal DNS: ems-backend.dev.svc.cluster.local
+#
+# Apply: kubectl apply -f k8s/backend/service.yaml -n dev
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ems-backend
+  namespace: dev
+  labels:
+    app: ems-backend
+    component: backend
+    managed-by: terraform
+  annotations:
+    description: "Backend REST API service"
+
+spec:
+  # Service type
+  type: ClusterIP
+  
+  # Port configuration
+  ports:
+    - name: http
+      port: 8080            # Service port
+      targetPort: 8080      # Container port
+      protocol: TCP
+  
+  # Pod selector
+  selector:
+    app: ems-backend
+  
+  # Publishing not required (internal only)
+  publishNotReadyAddresses: false
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# ServiceAccount - For pod authentication
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ems-backend
+  namespace: dev
+  labels:
+    app: ems-backend
+    managed-by: terraform
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# Role - Permissions for service account
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ems-backend
+  namespace: dev
+  labels:
+    app: ems-backend
+rules:
+  # Allow reading own namespace
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  # Allow reading configmaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Allow reading secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+# RoleBinding - Bind role to service account
+# [REDACTED_AWS_SECRET_KEY_CREDENTIALS_1]====================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ems-backend
+  namespace: dev
+  labels:
+    app: ems-backend
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ems-backend
+subjects:
+  - kind: ServiceAccount
+    name: ems-backend
+    namespace: dev

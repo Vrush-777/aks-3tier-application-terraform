@@ -1,0 +1,40 @@
+# Application Logs
+logs/
+*.log
+
+# PostgreSQL Data
+postgres_data/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Maven Build
+target/
+*.jar
+*.war
+
+# Node Modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build Artifacts
+dist/
+build/
+
+# Docker
+.dockerignore
+*.md.bak
+
+# OS
+Thumbs.db
