@@ -1,0 +1,8 @@
+{{- if .Release.IsInstall }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    {{- include "employee-management-system.labels" . | nindent 4 }}
+{{- end }}

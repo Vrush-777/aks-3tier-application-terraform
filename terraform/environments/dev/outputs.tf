@@ -197,15 +197,15 @@ output "kubelet_managed_identity_id" {
 output "deployment_summary" {
   description = "Summary of the deployment"
   value = {
-    resource_group           = module.resource_group.resource_group_name
-    location                 = module.resource_group.location
-    vnet_name                = module.network.vnet_name
-    aks_cluster_name         = module.aks.aks_name
-    aks_private_cluster      = var.aks_private_cluster_enabled
-    appgw_public_ip          = module.application_gateway.appgw_pip_address
-    acr_login_server         = module.acr.acr_login_server
-    postgres_fqdn            = module.postgres.postgres_fqdn
-    kubernetes_version       = module.aks.kubernetes_version
-    node_resource_group      = module.aks.node_resource_group
+    resource_group      = module.resource_group.resource_group_name
+    location            = module.resource_group.location
+    vnet_name           = module.network.vnet_name
+    aks_cluster_name    = module.aks.aks_name
+    aks_private_cluster = var.aks_private_cluster_enabled
+    appgw_public_ip     = module.application_gateway.appgw_pip_address
+    acr_login_server    = module.acr.acr_login_server
+    postgres_fqdn       = module.postgres.postgres_fqdn
+    kubernetes_version  = module.aks.kubernetes_version
+    node_resource_group = module.aks.node_resource_group
   }
 }

@@ -38,3 +38,30 @@ build/
 
 # OS
 Thumbs.db
+
+# ==========================
+# Terraform
+# ==========================
+.terraform/
+.terraform.lock.hcl
+
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+
+crash.log
+crash.*.log
+
+# Variable files containing secrets
+*.tfvars
+*.tfvars.json
+
+# Keep sample file
+!terraform.tfvars.example
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

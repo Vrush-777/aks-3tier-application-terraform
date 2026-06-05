@@ -45,21 +45,21 @@ resource "azurerm_user_assigned_identity" "kubelet_identity" {
 
 # RBAC Role Assignment - AKS Identity as Contributor to RG
 resource "azurerm_role_assignment" "aks_contributor" {
-  scope              = var.resource_group_id
+  scope                = var.resource_group_id
   role_definition_name = "Contributor"
-  principal_id       = azurerm_user_assigned_identity.aks_identity.principal_id
+  principal_id         = azurerm_user_assigned_identity.aks_identity.principal_id
 }
 
 # RBAC Role Assignment - Application Gateway Identity as Contributor to RG
 resource "azurerm_role_assignment" "appgw_contributor" {
-  scope              = var.resource_group_id
+  scope                = var.resource_group_id
   role_definition_name = "Contributor"
-  principal_id       = azurerm_user_assigned_identity.appgw_identity.principal_id
+  principal_id         = azurerm_user_assigned_identity.appgw_identity.principal_id
 }
 
 # RBAC Role Assignment - Kubelet Identity for ACR pull
 resource "azurerm_role_assignment" "kubelet_acr_pull" {
-  scope              = var.acr_id
+  scope                = var.acr_id
   role_definition_name = "AcrPull"
-  principal_id       = azurerm_user_assigned_identity.kubelet_identity.principal_id
+  principal_id         = azurerm_user_assigned_identity.kubelet_identity.principal_id
 }

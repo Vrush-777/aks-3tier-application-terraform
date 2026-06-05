@@ -41,11 +41,14 @@ resource "azurerm_application_gateway" "appgw" {
   }
 
   # Frontend IP Configuration - Private (for AGIC)
-  frontend_ip_configuration {
-    name              = "private-frontend-ip"
-    subnet_id         = var.appgw_subnet_id
-    private_ip_address = var.appgw_private_ip_address
-    private_ip_address_allocation = "Static"
+  dynamic "frontend_ip_configuration" {
+    for_each = var.appgw_private_ip_address != "" ? [1] : []
+    content {
+      name                          = "private-frontend-ip"
+      subnet_id                     = var.appgw_subnet_id
+      private_ip_address            = var.appgw_private_ip_address
+      private_ip_address_allocation = "Static"
+    }
   }
 
   # Frontend Port - HTTP
@@ -72,7 +75,7 @@ resource "azurerm_application_gateway" "appgw" {
     port                  = 80
     protocol              = "Http"
     request_timeout       = 20
-    host_name             = ""
+    # host_name             = ""
   }
 
   # HTTP Request Routing Rule
@@ -87,10 +90,22 @@ resource "azurerm_application_gateway" "appgw" {
   request_routing_rule {
     name                       = "http-routing-rule"
     priority                   = 9
-    rule_type                  = "PathBased"
+    rule_type                  = "Basic"
     http_listener_name         = "http-listener"
     backend_address_pool_name  = "backend-pool"
     backend_http_settings_name = "http-settings"
+  }
+
+  dynamic "request_routing_rule" {
+    for_each = var.tls_enabled ? [1] : []
+    content {
+      name                       = "https-routing-rule"
+      priority                   = 10
+      rule_type                  = "Basic"
+      http_listener_name         = "https-listener"
+      backend_address_pool_name  = "backend-pool"
+      backend_http_settings_name = "http-settings"
+    }
   }
 
   # Optional: HTTPS listener and rule
@@ -109,9 +124,9 @@ resource "azurerm_application_gateway" "appgw" {
   dynamic "ssl_certificate" {
     for_each = var.tls_enabled && var.ssl_certificate_path != "" ? [1] : []
     content {
-      name                = "appgw-cert"
-      data                = filebase64(var.ssl_certificate_path)
-      password            = var.ssl_certificate_password
+      name     = "appgw-cert"
+      data     = filebase64(var.ssl_certificate_path)
+      password = var.ssl_certificate_password
     }
   }
 
@@ -119,12 +134,17 @@ resource "azurerm_application_gateway" "appgw" {
   dynamic "waf_configuration" {
     for_each = var.enable_waf ? [1] : []
     content {
-      enabled            = true
-      firewall_mode      = var.waf_mode
-      rule_set_type      = var.waf_rule_set_type
-      rule_set_version   = var.waf_rule_set_version
+      enabled          = true
+      firewall_mode    = var.waf_mode
+      rule_set_type    = var.waf_rule_set_type
+      rule_set_version = var.waf_rule_set_version
     }
   }
+
+  ssl_policy {
+  policy_type = "Predefined"
+  policy_name = "AppGwSslPolicy20220101"
+}
 
   tags = merge(
     var.common_tags,
@@ -150,8 +170,12 @@ resource "azurerm_application_gateway" "appgw" {
 
 # Diagnostic Settings for Application Gateway
 resource "azurerm_monitor_diagnostic_setting" "appgw_diagnostics" {
-  count              = var.enable_diagnostics ? 1 : 0
-  name               = "${var.appgw_name}-diagnostics"
+  count = (
+    var.enable_diagnostics &&
+    var.log_analytics_workspace_id != ""
+  ) ? 1 : 0
+
+  name                       = "${var.appgw_name}-diagnostics"
   target_resource_id = azurerm_application_gateway.appgw.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

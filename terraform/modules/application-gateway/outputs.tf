@@ -20,12 +20,31 @@ output "appgw_pip_address" {
   value       = azurerm_public_ip.appgw_pip.ip_address
 }
 
+# output "appgw_private_ip_address" {
+#   description = "Private IP address of the Application Gateway"
+
+#   value = one([
+#     for cfg in azurerm_application_gateway.appgw.frontend_ip_configuration :
+#     cfg.private_ip_address
+#     if try(cfg.private_ip_address, null) != null
+#   ])
+# }
+
 output "appgw_private_ip_address" {
-  description = "Private IP address of the Application Gateway"
-  value       = azurerm_application_gateway.appgw.frontend_ip_configuration[1].private_ip_address
+  value = try(
+    [
+      for cfg in azurerm_application_gateway.appgw.frontend_ip_configuration :
+      cfg.private_ip_address
+      if try(cfg.private_ip_address, null) != null
+    ][0],
+    null
+  )
 }
 
 output "appgw_backend_pool_id" {
-  description = "ID of the backend address pool"
-  value       = azurerm_application_gateway.appgw.backend_address_pool[0].id
+  description = "Backend Pool ID"
+  value = one([
+    for pool in azurerm_application_gateway.appgw.backend_address_pool :
+    pool.id
+  ])
 }

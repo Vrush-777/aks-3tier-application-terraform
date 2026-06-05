@@ -1,0 +1,48 @@
+1. Get the application URL(s):
+
+{{- if .Values.frontend.ingress.enabled }}
+Frontend (Ingress):
+{{- range $host := .Values.frontend.ingress.hosts }}
+  https://{{ $host.host }}
+{{- end }}
+{{- else if eq .Values.frontend.service.type "LoadBalancer" }}
+Frontend (LoadBalancer):
+  kubectl get svc {{ .Values.frontend.name }} -n {{ .Values.namespace }} --template="{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"
+{{- else if eq .Values.frontend.service.type "ClusterIP" }}
+Frontend (Port Forward):
+  kubectl port-forward -n {{ .Values.namespace }} svc/{{ .Values.frontend.name }} 80:{{ .Values.frontend.service.port }}
+{{- end }}
+
+{{- if .Values.backend.ingress.enabled }}
+Backend (Ingress):
+{{- range $host := .Values.backend.ingress.hosts }}
+  https://{{ $host.host }}
+{{- end }}
+{{- else if eq .Values.backend.service.type "LoadBalancer" }}
+Backend (LoadBalancer):
+  kubectl get svc {{ .Values.backend.name }} -n {{ .Values.namespace }} --template="{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"
+{{- else if eq .Values.backend.service.type "ClusterIP" }}
+Backend (Port Forward):
+  kubectl port-forward -n {{ .Values.namespace }} svc/{{ .Values.backend.name }} 8080:{{ .Values.backend.service.port }}
+{{- end }}
+
+2. Check the deployment status:
+  kubectl rollout status deployment/{{ .Values.backend.name }} -n {{ .Values.namespace }}
+  kubectl rollout status deployment/{{ .Values.frontend.name }} -n {{ .Values.namespace }}
+
+3. View logs:
+  kubectl logs -n {{ .Values.namespace }} -l app.kubernetes.io/name={{ include "employee-management-system.name" . }} -f
+
+4. Describe resources:
+  kubectl describe deployment -n {{ .Values.namespace }}
+  kubectl describe pods -n {{ .Values.namespace }}
+
+5. Database connection:
+  kubectl get svc {{ .Release.Name }}-postgresql -n {{ .Values.namespace }}
+
+⚠️  WARNING: You provided a plaintext database password in values.yaml!
+    For production use, create a pre-existing secret and set postgresql.auth.existingSecret
+
+Environment: {{ .Values.global.environment }}
+Namespace: {{ .Values.namespace }}
+Release: {{ .Release.Name }}

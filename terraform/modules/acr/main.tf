@@ -48,18 +48,14 @@ resource "azurerm_private_endpoint" "acr_private_endpoint" {
 
 # Optional: Diagnostic Settings for ACR
 resource "azurerm_monitor_diagnostic_setting" "acr_diagnostics" {
-  count              = var.enable_diagnostics ? 1 : 0
-  name               = "${var.acr_name}-diagnostics"
+  count = (
+    var.enable_diagnostics &&
+    var.log_analytics_workspace_id != ""
+  ) ? 1 : 0
+
+  name                       = "${var.acr_name}-diagnostics"
   target_resource_id = azurerm_container_registry.acr.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  enabled_log {
-    category = "ContainerRegistryRepositoryEvents"
-  }
-
-  enabled_log {
-    category = "ContainerRegistryLoginEvents"
-  }
 
   metric {
     category = "AllMetrics"

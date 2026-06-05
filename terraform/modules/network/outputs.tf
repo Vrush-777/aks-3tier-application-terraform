@@ -39,3 +39,8 @@ output "appgw_nsg_id" {
   description = "ID of the Application Gateway Network Security Group"
   value       = azurerm_network_security_group.appgw_nsg.id
 }
+
+output "postgres_subnet_id" {
+  description = "ID of the PostgreSQL delegated subnet"
+  value       = var.create_postgres_subnet ? azurerm_subnet.postgres_subnet[0].id : null
+}

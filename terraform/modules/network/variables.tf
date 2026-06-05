@@ -42,7 +42,25 @@ variable "appgw_subnet_name" {
 variable "appgw_subnet_address_prefixes" {
   description = "Address prefixes for Application Gateway subnet"
   type        = list(string)
-  default     = ["10.0.2.0/24"]
+  default     = ["10.1.2.0/24"]
+}
+
+variable "postgres_subnet_name" {
+  description = "Name of the PostgreSQL delegated subnet"
+  type        = string
+  default     = "postgres-subnet"
+}
+
+variable "postgres_subnet_address_prefixes" {
+  description = "Address prefixes for PostgreSQL subnet"
+  type        = list(string)
+  default     = ["10.1.3.0/24"]
+}
+
+variable "create_postgres_subnet" {
+  description = "Whether to create a dedicated PostgreSQL subnet"
+  type        = bool
+  default     = true
 }
 
 variable "aks_nsg_name" {

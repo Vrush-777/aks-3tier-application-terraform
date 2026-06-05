@@ -50,7 +50,7 @@ variable "vnet_name" {
 variable "address_space" {
   description = "Address space for virtual network"
   type        = list(string)
-  default     = ["[REDACTED_IPV4_ADDRESS_1]/16"]
+  default     = ["10.1.0.0/16"]
 }
 
 variable "aks_subnet_name" {
@@ -62,7 +62,7 @@ variable "aks_subnet_name" {
 variable "aks_subnet_address_prefixes" {
   description = "Address prefixes for AKS subnet"
   type        = list(string)
-  default     = ["[REDACTED_IPV4_ADDRESS_2]/24"]
+  default     = ["10.1.1.0/24"]
 }
 
 variable "appgw_subnet_name" {
@@ -74,7 +74,25 @@ variable "appgw_subnet_name" {
 variable "appgw_subnet_address_prefixes" {
   description = "Address prefixes for Application Gateway subnet"
   type        = list(string)
-  default     = ["[REDACTED_IPV4_ADDRESS_3]/24"]
+  default     = ["10.1.2.0/24"]
+}
+
+variable "postgres_subnet_name" {
+  description = "Name of the PostgreSQL subnet"
+  type        = string
+  default     = "postgres-subnet"
+}
+
+variable "postgres_subnet_address_prefixes" {
+  description = "Address prefixes for PostgreSQL subnet"
+  type        = list(string)
+  default     = ["10.1.3.0/24"]
+}
+
+variable "create_postgres_subnet" {
+  description = "Create a dedicated PostgreSQL subnet"
+  type        = bool
+  default     = true
 }
 
 variable "aks_nsg_name" {
@@ -182,7 +200,7 @@ variable "postgres_backup_retention_days" {
 variable "postgres_ha_mode" {
   description = "High Availability mode (Disabled, ZoneRedundant)"
   type        = string
-  default     = "ZoneRedundant"
+  default     = "Disabled"
 }
 
 variable "postgres_standby_az" {
@@ -273,7 +291,7 @@ variable "appgw_capacity" {
 variable "appgw_private_ip_address" {
   description = "Application Gateway private IP"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_4]"
+  default     = "10.1.2.10"
 }
 
 variable "appgw_tls_enabled" {
@@ -331,7 +349,7 @@ variable "aks_cluster_name" {
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.29"
+  default     = "1.34.7"
 }
 
 variable "aks_default_node_pool_name" {
@@ -403,19 +421,19 @@ variable "aks_network_policy" {
 variable "aks_dns_service_ip" {
   description = "AKS DNS service IP"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_5]"
+  default     = "10.2.0.10"
 }
 
-variable "aks_docker_bridge_cidr" {
-  description = "AKS docker bridge CIDR"
-  type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_6]/16"
-}
+# variable "aks_docker_bridge_cidr" {
+#   description = "AKS docker bridge CIDR"
+#   type        = string
+#   default     = "172.17.0.1/16"
+# }
 
 variable "aks_service_cidr" {
   description = "AKS service CIDR"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_7]/16"
+  default     = "10.2.0.0/16"
 }
 
 variable "aks_outbound_type" {
@@ -433,7 +451,7 @@ variable "aks_private_cluster_enabled" {
 variable "aks_private_dns_zone_id" {
   description = "Private DNS zone ID for AKS"
   type        = string
-  default     = ""
+  default     = "System"
 }
 
 variable "aks_admin_group_object_ids" {
@@ -492,12 +510,12 @@ variable "aks_additional_node_pools" {
     availability_zones  = list(string)
     os_disk_size_gb     = number
     enable_auto_scaling = bool
-    min_count          = number
-    max_count          = number
-    node_labels        = map(string)
-    node_taints        = list(string)
-    priority           = string
-    spot_max_price     = optional(number)
+    min_count           = number
+    max_count           = number
+    node_labels         = map(string)
+    node_taints         = list(string)
+    priority            = string
+    spot_max_price      = optional(number)
   }))
   default = {}
 }
@@ -509,7 +527,7 @@ variable "aks_additional_node_pools" {
 variable "enable_diagnostics" {
   description = "Enable diagnostic settings for resources"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "log_analytics_workspace_id" {

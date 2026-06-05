@@ -1,0 +1,143 @@
+# Production environment overrides
+global:
+  environment: prod
+  domain: prod.example.com
+  tls:
+    enabled: true
+    issuer: letsencrypt-prod
+
+registry:
+  name: "acr.azurecr.io"
+
+frontend:
+  replicaCount: 3
+  image:
+    tag: "latest"
+    pullPolicy: Always
+  service:
+    type: LoadBalancer
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/rate-limit: "500"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    hosts:
+      - host: app.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: frontend-tls
+        hosts:
+          - app.example.com
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector:
+    workload: production
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - ems-frontend
+            topologyKey: kubernetes.io/hostname
+
+backend:
+  replicaCount: 3
+  image:
+    tag: "latest"
+    pullPolicy: Always
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/rate-limit: "500"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    hosts:
+      - host: api.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: backend-tls
+        hosts:
+          - api.example.com
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+  nodeSelector:
+    workload: production
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - ems-backend
+            topologyKey: kubernetes.io/hostname
+
+postgresql:
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClassName: managed-premium
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+
+monitoring:
+  enabled: true
+  prometheus:
+    scrapeInterval: 15s
+    scrapeTimeout: 10s
+
+logging:
+  enabled: true
+  loglevel: INFO
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: 30
+
+podSecurityPolicy:
+  enabled: true
+
+networkPolicy:
+  enabled: true

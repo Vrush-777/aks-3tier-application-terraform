@@ -27,7 +27,7 @@ resource "azurerm_subnet" "aks_subnet" {
   service_endpoints = ["Microsoft.KeyVault", "Microsoft.Sql", "Microsoft.Storage"]
 
   # Enable private endpoint network policies
-  private_endpoint_network_policies_enabled = true
+  private_endpoint_network_policies = "Enabled"
 }
 
 # Application Gateway Subnet
@@ -36,6 +36,26 @@ resource "azurerm_subnet" "appgw_subnet" {
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.appgw_subnet_address_prefixes
+}
+
+# PostgreSQL Delegated Subnet
+resource "azurerm_subnet" "postgres_subnet" {
+  count                = var.create_postgres_subnet ? 1 : 0
+  name                 = var.postgres_subnet_name
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = var.postgres_subnet_address_prefixes
+
+  delegation {
+    name = "postgres-delegation"
+
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+
+  private_endpoint_network_policies = "Disabled"
 }
 
 # Network Security Group for AKS
@@ -101,6 +121,43 @@ resource "azurerm_network_security_rule" "appgw_http_inbound" {
   resource_group_name         = var.resource_group_name
   network_security_group_name = azurerm_network_security_group.appgw_nsg.name
 }
+
+# NSG Rules for Application Gateway - Allow Gateway Manager (required for AGIC)
+resource "azurerm_network_security_rule" "appgw_gateway_manager" {
+  name                        = "AllowGatewayManager"
+  priority                    = 120
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+
+  source_port_range           = "*"
+  destination_port_ranges     = ["65200-65535"]
+
+  source_address_prefix       = "GatewayManager"
+  destination_address_prefix  = "*"
+
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.appgw_nsg.name
+}
+
+# NSG Rules for Application Gateway - Allow Azure Load Balancer (required for AGIC)
+resource "azurerm_network_security_rule" "appgw_azure_lb" {
+  name                        = "AllowAzureLoadBalancer"
+  priority                    = 130
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+
+  source_port_range           = "*"
+  destination_port_range      = "*"
+
+  source_address_prefix       = "AzureLoadBalancer"
+  destination_address_prefix  = "*"
+
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.appgw_nsg.name
+}
+
 
 # NSG Association for Application Gateway Subnet
 resource "azurerm_subnet_network_security_group_association" "appgw_nsg_assoc" {

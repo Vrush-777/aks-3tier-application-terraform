@@ -44,3 +44,18 @@ output "kubelet_identity_client_id" {
   description = "Client ID of the Kubelet managed identity"
   value       = azurerm_user_assigned_identity.kubelet_identity.client_id
 }
+
+output "aks_contributor_role_assignment_id" {
+  description = "AKS Contributor Role Assignment ID"
+  value       = azurerm_role_assignment.aks_contributor.id
+}
+
+output "appgw_contributor_role_assignment_id" {
+  description = "Application Gateway Contributor Role Assignment ID"
+  value       = azurerm_role_assignment.appgw_contributor.id
+}
+
+output "kubelet_acr_pull_role_assignment_id" {
+  description = "Kubelet ACR Pull Role Assignment ID"
+  value       = azurerm_role_assignment.kubelet_acr_pull.id
+}

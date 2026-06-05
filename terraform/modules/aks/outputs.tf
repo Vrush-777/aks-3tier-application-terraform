@@ -74,6 +74,6 @@ output "node_resource_group" {
 
 output "admin_credentials" {
   description = "Admin credentials configuration"
-  value       = azurerm_kubernetes_cluster.aks.kube_admin_config[0]
+  value       = try(azurerm_kubernetes_cluster.aks.kube_admin_config[0], null)
   sensitive   = true
 }

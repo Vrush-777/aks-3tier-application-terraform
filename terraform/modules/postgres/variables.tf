@@ -43,15 +43,10 @@ variable "admin_username" {
   default     = "adminuser"
 }
 
-variable "admin_password" {
-  description = "Administrator password (must be 8-128 characters with mixed case, numbers, special chars)"
+variable "postgres_admin_password" {
+  description = "PostgreSQL admin password"
   type        = string
   sensitive   = true
-
-  validation {
-    condition     = can(regex("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,128}$", var.admin_password))
-    error_message = "Password must be 8-128 characters with uppercase, lowercase, digits, and special characters."
-  }
 }
 
 variable "storage_mb" {
@@ -69,7 +64,7 @@ variable "backup_retention_days" {
 variable "high_availability_mode" {
   description = "High availability mode (Disabled, ZoneRedundant)"
   type        = string
-  default     = "ZoneRedundant"
+  default     = "Disabled"
 }
 
 variable "standby_availability_zone" {

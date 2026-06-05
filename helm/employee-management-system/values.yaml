@@ -1,0 +1,207 @@
+# Default values for employee-management-system
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+namespace: employee-management
+
+# Global settings
+global:
+  environment: dev
+  domain: example.com
+  tls:
+    enabled: true
+    issuer: letsencrypt-prod
+
+# Container Registry Settings
+registry:
+  name: "acr.azurecr.io"  # Set via GitHub secret
+  username: ""
+  password: ""
+  email: "docker@example.com"
+
+# Frontend Configuration
+frontend:
+  enabled: true
+  name: ems-frontend
+  replicaCount: 2
+
+  image:
+    repository: "acr.azurecr.io/ems-frontend"
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 80
+    annotations: {}
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/rate-limit: "100"
+    hosts:
+      - host: app.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: frontend-tls
+        hosts:
+          - app.example.com
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# Backend Configuration
+backend:
+  enabled: true
+  name: ems-backend
+  replicaCount: 2
+
+  image:
+    repository: "acr.azurecr.io/ems-backend"
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    annotations: {}
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/rate-limit: "100"
+    hosts:
+      - host: api.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: backend-tls
+        hosts:
+          - api.example.com
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 80
+
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+  # Spring Boot Application Configuration
+  config:
+    spring:
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+            jdbc:
+              batch_size: 20
+            order_inserts: true
+            order_updates: true
+      datasource:
+        hikari:
+          maximum-pool-size: 20
+          minimum-idle: 5
+          connection-timeout: 30000
+          idle-timeout: 600000
+
+# PostgreSQL Configuration
+postgresql:
+  enabled: true
+  auth:
+    username: employee_user
+    password: "ChangeMe123!"  # Override in values-*.yaml files
+    database: employee_db
+    existingSecret: ""
+
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: managed-premium
+
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+  metrics:
+    enabled: true
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# Pod Security Policy
+podSecurityPolicy:
+  enabled: false  # Set to true for production
+
+# Monitoring & Logging
+monitoring:
+  enabled: false
+  prometheus:
+    scrapeInterval: 30s
+    scrapeTimeout: 10s
+
+logging:
+  enabled: false
+  loglevel: INFO
+
+# Backup Configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: 7  # days
+
+# Common labels and annotations
+commonLabels:
+  app.kubernetes.io/name: employee-management-system
+  app.kubernetes.io/instance: release-name
+  app.kubernetes.io/version: "1.0.0"
+
+commonAnnotations:
+  description: "Employee Management System Helm Chart"

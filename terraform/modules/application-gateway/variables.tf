@@ -52,7 +52,7 @@ variable "appgw_capacity" {
 variable "appgw_private_ip_address" {
   description = "Private IP address for Application Gateway in the subnet"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_1]"
+  default     = ""
 }
 
 variable "tls_enabled" {

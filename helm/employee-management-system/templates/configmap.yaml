@@ -1,0 +1,51 @@
+{{- if .Values.backend.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.backend.name }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "employee-management-system.labels" . | nindent 4 }}
+data:
+  application.yml: |
+    server:
+      port: 8080
+      servlet:
+        context-path: /
+    spring:
+      application:
+        name: ems-backend
+      profiles:
+        active: {{ .Values.global.environment }}
+      jpa:
+        show-sql: false
+        hibernate:
+          ddl-auto: {{ .Values.backend.config.spring.jpa.hibernate.ddl_auto | default "validate" }}
+          naming:
+            physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+            jdbc:
+              batch_size: {{ .Values.backend.config.spring.jpa.properties.hibernate.jdbc.batch_size | default 20 }}
+            order_inserts: {{ .Values.backend.config.spring.jpa.properties.hibernate.order_inserts | default true }}
+            order_updates: {{ .Values.backend.config.spring.jpa.properties.hibernate.order_updates | default true }}
+      datasource:
+        hikari:
+          maximum-pool-size: {{ .Values.backend.config.spring.datasource.hikari.maximum_pool_size | default 20 }}
+          minimum-idle: {{ .Values.backend.config.spring.datasource.hikari.minimum_idle | default 5 }}
+          connection-timeout: {{ .Values.backend.config.spring.datasource.hikari.connection_timeout | default 30000 }}
+          idle-timeout: {{ .Values.backend.config.spring.datasource.hikari.idle_timeout | default 600000 }}
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+      endpoint:
+        health:
+          show-details: when-authorized
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+{{- end }}

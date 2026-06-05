@@ -1,0 +1,71 @@
+# Example Terraform variables for the dev environment
+# Copy this file to terraform.tfvars and update values before running Terraform.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+
+resource_group_name = "rg-aks-3tier-dev"
+location            = "Central India"
+
+# Network
+vnet_name                     = "vnet-aks-3tier-dev"
+address_space                 = ["10.1.0.0/16"]
+aks_subnet_name               = "aks-subnet"
+aks_subnet_address_prefixes   = ["10.1.1.0/24"]
+appgw_subnet_name             = "appgw-subnet"
+appgw_subnet_address_prefixes = ["10.1.2.0/24"]
+postgres_subnet_name          = "postgres-subnet"
+postgres_subnet_address_prefixes = ["10.1.3.0/24"]
+create_route_table            = false
+
+# Azure Container Registry
+acr_name                = "acr<unique>"
+acr_sku                 = "Premium"
+acr_enable_admin_access = false
+acr_enable_public_network = true
+acr_enable_private_endpoint = false
+
+# PostgreSQL
+postgres_server_name    = "pgemsdev"
+postgres_admin_username = "postgresadmin"
+postgres_admin_password = "ChangeMe123!"
+postgres_database_name  = "employee_db"
+postgres_storage_mb     = 65536
+postgres_backup_retention_days = 7
+postgres_ha_mode        = "Disabled"
+postgres_standby_az     = "2"
+postgres_ssl_enforce    = true
+postgres_geo_redundant_backup = true
+postgres_max_connections = 100
+
+# Application Gateway
+appgw_name              = "appgw-ems-dev"
+appgw_pip_name          = "appgw-pip"
+appgw_sku_name          = "Standard_v2"
+appgw_tier              = "Standard_v2"
+appgw_capacity          = 2
+appgw_private_ip_address = "10.1.2.10"
+appgw_tls_enabled       = false
+appgw_enable_waf        = false
+
+# AKS
+aks_cluster_name        = "aks-ems-dev"
+aks_default_node_pool_name = "systempool"
+aks_default_node_pool_count = 3
+aks_default_node_pool_vm_size = "Standard_D2s_v3"
+aks_enable_auto_scaling = true
+aks_min_count           = 3
+aks_max_count           = 10
+aks_availability_zones  = ["1", "2", "3"]
+aks_network_policy      = "azure"
+aks_dns_service_ip      = "10.2.0.10"
+aks_docker_bridge_cidr  = "172.17.0.1/16"
+aks_service_cidr        = "10.2.0.0/16"
+aks_outbound_type       = "loadBalancer"
+aks_private_cluster_enabled = true
+aks_private_dns_zone_id = ""
+aks_admin_group_object_ids = []
+
+# Diagnostics
+enable_diagnostics    = true
+log_analytics_workspace_id = ""

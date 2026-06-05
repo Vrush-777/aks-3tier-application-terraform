@@ -1,0 +1,79 @@
+# Development environment overrides
+global:
+  environment: dev
+  domain: dev.example.com
+
+registry:
+  name: "acr.azurecr.io"
+
+frontend:
+  replicaCount: 1
+  image:
+    tag: "dev"
+  service:
+    type: ClusterIP
+  ingress:
+    hosts:
+      - host: app-dev.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: frontend-dev-tls
+        hosts:
+          - app-dev.example.com
+  autoscaling:
+    enabled: false
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+backend:
+  replicaCount: 1
+  image:
+    tag: "dev"
+  ingress:
+    hosts:
+      - host: api-dev.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: backend-dev-tls
+        hosts:
+          - api-dev.example.com
+  autoscaling:
+    enabled: false
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+postgresql:
+  primary:
+    persistence:
+      size: 5Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+monitoring:
+  enabled: false
+
+logging:
+  enabled: true
+  loglevel: DEBUG
+
+backup:
+  enabled: false

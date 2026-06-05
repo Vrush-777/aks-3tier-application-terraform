@@ -18,7 +18,7 @@ variable "resource_group_name" {
 variable "kubernetes_version" {
   description = "Kubernetes version (e.g., '1.27', '1.28')"
   type        = string
-  default     = "1.29"
+  default     = "1.34.7"
 }
 
 variable "default_node_pool_name" {
@@ -101,19 +101,19 @@ variable "network_policy" {
 variable "dns_service_ip" {
   description = "Kubernetes DNS service IP"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_1]"
+  default     = ""
 }
 
-variable "docker_bridge_cidr" {
-  description = "Docker bridge CIDR"
-  type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_2]/16"
-}
+# variable "docker_bridge_cidr" {
+#   description = "Docker bridge CIDR"
+#   type        = string
+#   default     = ""
+# }
 
 variable "service_cidr" {
   description = "Kubernetes service CIDR"
   type        = string
-  default     = "[REDACTED_IPV4_ADDRESS_3]/16"
+  default     = ""
 }
 
 variable "outbound_type" {
@@ -254,12 +254,12 @@ variable "additional_node_pools" {
     availability_zones  = list(string)
     os_disk_size_gb     = number
     enable_auto_scaling = bool
-    min_count          = number
-    max_count          = number
-    node_labels        = map(string)
-    node_taints        = list(string)
-    priority           = string  # "Regular" or "Spot"
-    spot_max_price     = optional(number)
+    min_count           = number
+    max_count           = number
+    node_labels         = map(string)
+    node_taints         = list(string)
+    priority            = string # "Regular" or "Spot"
+    spot_max_price      = optional(number)
   }))
   default = {}
 }
