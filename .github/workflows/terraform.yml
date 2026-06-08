@@ -53,7 +53,6 @@ jobs:
           terraform init \
             -backend-config="subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" \
             -backend-config="resource_group_name=${{ env.RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=tfstate${{ hashFiles('.') | substring(0, 8) }}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=dev.terraform.tfstate"
 
