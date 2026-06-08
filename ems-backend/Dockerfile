@@ -1,4 +1,3 @@
-# Production-ready Multi-stage Dockerfile for Spring Boot Backend
 # Stage 1: Maven build stage
 FROM maven:3.9-eclipse-temurin-21-alpine AS maven-builder
 

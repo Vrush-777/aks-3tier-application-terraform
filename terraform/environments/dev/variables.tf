@@ -218,7 +218,7 @@ variable "postgres_ssl_enforce" {
 variable "postgres_geo_redundant_backup" {
   description = "Enable geo-redundant backups for PostgreSQL"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "postgres_database_name" {

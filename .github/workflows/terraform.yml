@@ -55,7 +55,7 @@ jobs:
             -backend-config="resource_group_name=${{ env.RESOURCE_GROUP }}" \
             -backend-config="storage_account_name=tfstate${{ hashFiles('.') | substring(0, 8) }}" \
             -backend-config="container_name=tfstate" \
-            -backend-config="key=prod.terraform.tfstate"
+            -backend-config="key=dev.terraform.tfstate"
 
       - name: Terraform Validate
         id: validate
@@ -172,7 +172,7 @@ jobs:
         working-directory: ./terraform/environments/dev
 
     environment:
-      name: production
+      name: dev
 
     steps:
       - name: Checkout code
