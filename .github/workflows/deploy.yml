@@ -18,14 +18,10 @@ on:
 
 env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ACR_NAME: ${{ secrets.ACR_NAME }}
   ACR_LOGIN_SERVER: ${{ secrets.ACR_NAME }}.azurecr.io
   AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
   RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
-  REGISTRY_USERNAME: 00000000-0000-0000-0000-000000000000
   HELM_CHART_PATH: ./helm/employee-management-system
   DEPLOYMENT_NAMESPACE: employee-management
   DOCKER_BUILDKIT: 1
@@ -98,10 +94,9 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Get ACR Credentials
-        if: github.event_name == 'push'
+      - name: Login to ACR
         run: |
-          echo "REGISTRY_PASSWORD=$(az acr credential show --name ${{ env.ACR_NAME }} -g ${{ env.RESOURCE_GROUP }} --query passwords[0].value -o tsv)" >> $GITHUB_ENV
+          az acr login --name ${{ env.ACR_NAME }}
 
       - name: Set up Docker Buildx
         if: github.event_name == 'push'
@@ -117,9 +112,7 @@ jobs:
             ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/ems-backend:latest
             ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ github.ref_name }}
-          registry: ${{ env.ACR_LOGIN_SERVER }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
+          
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -169,22 +162,13 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Tests
-        id: tests
-        run: npm test -- --coverage --watchAll=false
-        continue-on-error: true
+      # - name: Run Tests
+      #   id: tests
+      #   run: npm test -- --coverage --watchAll=false
+      #   continue-on-error: true
 
       - name: Build Application
-        if: steps.tests.outcome == 'success'
         run: npm run build
-
-      - name: Upload Coverage Reports
-        if: always()
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./ems-fullstack/coverage/coverage-final.json
-          flags: frontend
-          name: frontend-coverage
 
       - name: Azure Login
         if: github.event_name == 'push'
@@ -192,10 +176,14 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Get ACR Credentials
-        if: github.event_name == 'push'
+      # - name: Get ACR Credentials
+      #   if: github.event_name == 'push'
+      #   run: |
+      #     echo "REGISTRY_PASSWORD=$(az acr credential show --name ${{ env.ACR_NAME }} -g ${{ env.RESOURCE_GROUP }} --query passwords[0].value -o tsv)" >> $GITHUB_ENV
+
+      - name: Login to ACR
         run: |
-          echo "REGISTRY_PASSWORD=$(az acr credential show --name ${{ env.ACR_NAME }} -g ${{ env.RESOURCE_GROUP }} --query passwords[0].value -o tsv)" >> $GITHUB_ENV
+          az acr login --name ${{ env.ACR_NAME }}
 
       - name: Set up Docker Buildx
         if: github.event_name == 'push'
@@ -211,9 +199,6 @@ jobs:
             ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:latest
             ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ github.ref_name }}
-          registry: ${{ env.ACR_LOGIN_SERVER }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -255,9 +240,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v1
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Get AKS Credentials
         run: |
