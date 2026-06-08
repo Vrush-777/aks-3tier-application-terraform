@@ -134,7 +134,7 @@ jobs:
         run: terraform show -json tfplan > tfplan.json
 
       - name: Upload Plan Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ github.run_id }}
           path: |
@@ -214,7 +214,7 @@ jobs:
           echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_ENV
 
       - name: Upload Terraform State
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: terraform-state-${{ github.run_id }}
