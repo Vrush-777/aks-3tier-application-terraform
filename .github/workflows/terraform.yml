@@ -17,7 +17,7 @@ on:
       - '.github/workflows/terraform.yml'
 
 env:
-  TF_VERSION: 1.6.0
+  TF_VERSION: 1.14.9
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -47,10 +47,15 @@ jobs:
           terraform fmt -check -recursive ..
         continue-on-error: true
 
+      - name: Clean Terraform Cache
+        run: |
+          rm -rf ~/.terraform.d
+          rm -rf .terraform
+
       - name: Terraform Init
         id: init
         run: |
-          terraform init
+          terraform init -upgrade
 
       - name: Terraform Validate
         id: validate
@@ -106,13 +111,18 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Clean Terraform Cache
+        run: |
+          rm -rf ~/.terraform.d
+          rm -rf .terraform
+
       - name: Terraform Init
         run: |
-          terraform init 
+          terraform init -upgrade
 
 
       - name: Terraform Plan
@@ -173,13 +183,18 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Clean Terraform Cache
+        run: |
+          rm -rf ~/.terraform.d
+          rm -rf .terraform
+
       - name: Terraform Init
         run: |
-          terraform init
+          terraform init -upgrade
 
 
       - name: Terraform Plan
