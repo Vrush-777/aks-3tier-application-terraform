@@ -50,11 +50,7 @@ jobs:
       - name: Terraform Init
         id: init
         run: |
-          terraform init \
-            -backend-config="subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" \
-            -backend-config="resource_group_name=${{ env.RESOURCE_GROUP }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=dev.terraform.tfstate"
+          terraform init
 
       - name: Terraform Validate
         id: validate
@@ -116,11 +112,8 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" \
-            -backend-config="resource_group_name=${{ env.RESOURCE_GROUP }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=prod.terraform.tfstate"
+          terraform init 
+
 
       - name: Terraform Plan
         id: plan
@@ -186,11 +179,8 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="subscription_id=${{ env.AZURE_SUBSCRIPTION_ID }}" \
-            -backend-config="resource_group_name=${{ env.RESOURCE_GROUP }}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=dev.terraform.tfstate"
+          terraform init
+
 
       - name: Terraform Plan
         id: plan
