@@ -1,20 +1,11 @@
 name: Build and Deploy to AKS
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'ems-backend/**'
-      - 'ems-fullstack/**'
-      - 'helm/**'
-      - 'k8s/**'
-      - '.github/workflows/deploy.yml'
-  pull_request:
-    branches:
-      - main
-      - develop
+  workflow_run:
+    workflows:
+      - Terraform Infrastructure Pipeline
+    types:
+      - completed
 
 env:
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
