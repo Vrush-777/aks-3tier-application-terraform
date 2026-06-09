@@ -103,7 +103,7 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: terraform-validation
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     defaults:
       run:
         working-directory: ./terraform/environments/dev
@@ -226,41 +226,3 @@ jobs:
         with:
           name: terraform-state-${{ github.run_id }}
           path: ./terraform/environments/dev/
-
-      - name: Slack Notification - Success
-        if: success()
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "✅ Terraform Apply Succeeded",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Terraform Infrastructure Updated* ✅\n*Ref:* ${{ github.ref }}\n*Commit:* ${{ github.sha }}"
-                  }
-                }
-              ]
-            }
-
-      - name: Slack Notification - Failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "❌ Terraform Apply Failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Terraform Apply Failed* ❌\n*Ref:* ${{ github.ref }}\n*Commit:* ${{ github.sha }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                  }
-                }
-              ]
-            }
