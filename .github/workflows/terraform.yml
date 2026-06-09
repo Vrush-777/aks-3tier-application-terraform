@@ -19,6 +19,18 @@ on:
 env:
   TF_VERSION: 1.14.9 # Latest stable version as of June 2024
 
+  TF_VAR_subscription_id: ${{ secrets.TF_VAR_subscription_id }}
+  TF_VAR_tenant_id: ${{ secrets.TF_VAR_tenant_id }}
+  TF_VAR_resource_group_name: ${{ secrets.TF_VAR_resource_group_name }}
+  TF_VAR_location: ${{ secrets.TF_VAR_location }}
+  TF_VAR_vnet_name: ${{ secrets.TF_VAR_vnet_name }}
+  TF_VAR_acr_name: ${{ secrets.TF_VAR_acr_name }}
+  TF_VAR_postgres_server_name: ${{ secrets.TF_VAR_postgres_server_name }}
+  TF_VAR_postgres_admin_username: ${{ secrets.TF_VAR_postgres_admin_username }}
+  TF_VAR_postgres_admin_password: ${{ secrets.TF_VAR_postgres_admin_password }}
+  TF_VAR_appgw_name: ${{ secrets.TF_VAR_appgw_name }}
+  TF_VAR_aks_cluster_name: ${{ secrets.TF_VAR_aks_cluster_name }}
+
 jobs:
   terraform-validation:
     name: Terraform Validate & Format
