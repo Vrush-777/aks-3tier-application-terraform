@@ -105,24 +105,6 @@ jobs:
             VCS_REF=${{ github.event.workflow_run.head_sha }}
             VERSION=${{ github.event.workflow_run.head_branch }}
 
-      - name: Slack Notification - Backend Success
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "✅ Backend Build Succeeded",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Backend Docker Image Built* ✅\n*Image:* ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ github.event.workflow_run.head_sha }}\n*Ref:* ${{ github.event.workflow_run.head_branch }}"
-                  }
-                }
-              ]
-            }
-
   build-frontend:
     name: Build and Push Frontend
     runs-on: ubuntu-latest
@@ -189,25 +171,6 @@ jobs:
             BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             VCS_REF=${{ github.event.workflow_run.head_sha }}
             VERSION=${{ github.event.workflow_run.head_branch }}
-
-      - name: Slack Notification - Frontend Success
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "✅ Frontend Build Succeeded",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Frontend Docker Image Built* ✅\n*Image:* ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ github.event.workflow_run.head_sha }}\n*Ref:* ${{ github.event.workflow_run.head_branch }}"
-                  }
-                }
-              ]
-            }
-
   deploy:
     name: Deploy to AKS via Helm
     runs-on: ubuntu-latest
@@ -317,44 +280,6 @@ jobs:
             --from-literal=helm-revision=$(helm history employee-management-system -n ${{ env.DEPLOYMENT_NAMESPACE }} | tail -1 | awk '{print $1}') \
             -n ${{ env.DEPLOYMENT_NAMESPACE }} \
             --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Slack Notification - Deployment Success
-        if: success()
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "✅ Deployment to AKS Succeeded",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Application Deployed to AKS* ✅\n*Environment:* dev\n*Cluster:* ${{ env.AKS_CLUSTER_NAME }}\n*Namespace:* ${{ env.DEPLOYMENT_NAMESPACE }}\n*Commit:* ${{ github.event.workflow_run.head_sha }}\n*Ref:* ${{ github.event.workflow_run.head_branch }}"
-                  }
-                }
-              ]
-            }
-
-      - name: Slack Notification - Deployment Failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
-        with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
-          payload: |
-            {
-              "text": "❌ Deployment to AKS Failed",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Deployment Failed* ❌\n*Environment:* dev\n*Cluster:* ${{ env.AKS_CLUSTER_NAME }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                  }
-                }
-              ]
-            }
 
       - name: Store Deployment Artifacts
         if: always()
