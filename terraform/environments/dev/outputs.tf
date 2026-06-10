@@ -130,8 +130,8 @@ output "aks_id" {
   value       = module.aks.aks_id
 }
 
-output "aks_name" {
-  description = "Name of the AKS cluster"
+output "aks_cluster_name" {
+  description = "AKS cluster name"
   value       = module.aks.aks_name
 }
 
