@@ -52,9 +52,5 @@ ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAM
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# Startup command using exec form for signal handling
-ENTRYPOINT ["java", "-jar"]
-CMD ["app.jar"]
-
 # Run the application
 ENTRYPOINT ["java", "-jar", "app.jar"]

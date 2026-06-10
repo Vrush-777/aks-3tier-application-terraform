@@ -87,10 +87,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Build and Push Docker Image
+      - name: Build and Push backend Docker Image
         uses: docker/build-push-action@v4
         with:
-          context: ./ems-backend
+          context: .
+          file: ./docker/backend.Dockerfile
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ github.event.workflow_run.head_sha }}
@@ -175,7 +176,8 @@ jobs:
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
         with:
-          context: ./ems-fullstack
+          context: .
+          file: ./docker/frontend.Dockerfile
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ github.event.workflow_run.head_sha }}

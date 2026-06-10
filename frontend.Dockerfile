@@ -1,6 +1,6 @@
 # Production-ready Multi-stage Dockerfile for React Frontend
 # Stage 1: Build stage - Node build environment
-FROM node:21-alpine AS node-builder
+FROM node:22-alpine AS node-builder
 
 LABEL maintainer="Platform Engineering Team"
 LABEL description="EMS Frontend - React UI Build Stage"
@@ -52,11 +52,11 @@ RUN chown -R nginx-user:www-user /usr/share/nginx/html && \
 USER nginx-user
 
 # Expose standard HTTP port
-EXPOSE 80
+EXPOSE 8080
 
 # Health check for container orchestration
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost/index.html || exit 1
+    CMD curl -f http://localhost/ || exit 1
 
 # Run Nginx in foreground mode (PID 1 for proper signal handling)
 CMD ["nginx", "-g", "daemon off;"]
