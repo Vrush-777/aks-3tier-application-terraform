@@ -115,10 +115,13 @@ jobs:
           az acr login --name ${{ env.ACR_NAME }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
 
       - name: Build and Push backend Docker Image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v6
         with:
           context: ./ems-backend
           file: ./docker/backend.Dockerfile
