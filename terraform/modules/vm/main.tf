@@ -1,3 +1,15 @@
+locals {
+  jumpvm_cloud_init = replace(
+    replace(
+      file("${path.module}/../../scripts/jumpvm-cloud-init.yaml"),
+      "__KUBECTL_VERSION__",
+      var.kubectl_version
+    ),
+    "__KUBELOGIN_VERSION__",
+    var.kubelogin_version
+  )
+}
+
 resource "azurerm_public_ip" "jump_vm" {
   name                = "${var.prefix}-jumpvm-pip"
   resource_group_name = var.resource_group_name
@@ -50,7 +62,7 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
     version   = "latest"
   }
 
-  custom_data = filebase64("${path.module}/../../scripts/jumpvm-cloud-init.yaml")
+  custom_data = base64encode(local.jumpvm_cloud_init)
 
   # System Assigned Managed Identity for authentication to Azure services
   identity {
@@ -58,6 +70,14 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.jumpvm_cloud_init]
+  }
+}
+
+resource "terraform_data" "jumpvm_cloud_init" {
+  input = sha256(local.jumpvm_cloud_init)
 }
 
 output "vm_id" {

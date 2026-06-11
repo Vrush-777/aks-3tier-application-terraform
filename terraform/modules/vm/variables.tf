@@ -38,6 +38,17 @@ variable "vm_size" {
   description = "VM size for the jump VM."
 }
 
+variable "kubectl_version" {
+  type        = string
+  description = "kubectl version installed on the Jump VM."
+}
+
+variable "kubelogin_version" {
+  type        = string
+  description = "kubelogin version installed on the Jump VM."
+  default     = "v0.2.18"
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags applied to the jump VM."

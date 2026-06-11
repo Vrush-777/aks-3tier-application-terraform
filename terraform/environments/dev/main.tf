@@ -3,7 +3,7 @@
 # Main configuration file that calls all modules
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.4"
 
   required_providers {
     azurerm = {
@@ -154,8 +154,9 @@ module "jump_vm" {
   location            = module.resource_group.location
   prefix              = var.resource_group_name
   admin_username      = var.jumpvm_admin_username
-  ssh_public_key      = var.jumpvm_ssh_public_key
+  ssh_public_key      = var.jumpvm_ssh_public_key != "" ? var.jumpvm_ssh_public_key : file(pathexpand(var.jumpvm_ssh_public_key_path))
   vm_size             = var.jumpvm_vm_size
+  kubectl_version     = "v${var.kubernetes_version}"
   subnet_id           = module.network.jumpvm_subnet_id
   nsg_id              = module.nsg.jumpvm_nsg_id
   aks_cluster_id      = module.aks.aks_id

@@ -1,417 +1,234 @@
 #cloud-config
-# Jump VM Cloud-Init Script for Private AKS Deployment
-# This script automatically installs all required tools and creates a deployment script
+package_update: false
+package_upgrade: false
 
-packages:
-  - curl
-  - wget
-  - git
-  - jq
-  - unzip
-  - apt-transport-https
-  - ca-certificates
-  - gnupg
-  - lsb-release
-  - software-properties-common
+output:
+  all: "| tee -a /var/log/cloud-init-output.log"
 
-runcmd:
-  # Update system packages
-  - apt-get update
-  - apt-get upgrade -y
+write_files:
+  - path: /usr/local/sbin/bootstrap-jumpvm.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
 
-  # ========================================================================
-  # 1. Install Azure CLI
-  # ========================================================================
-  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+      export DEBIAN_FRONTEND=noninteractive
+      export NEEDRESTART_MODE=a
+      export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-  # ========================================================================
-  # 2. Install kubectl
-  # ========================================================================
-  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-  - chmod +x kubectl
-  - mv kubectl /usr/local/bin/kubectl
+      LOG_FILE="/var/log/cloud-init-output.log"
+      KUBECTL_VERSION="${KUBECTL_VERSION:-__KUBECTL_VERSION__}"
+      KUBELOGIN_VERSION="${KUBELOGIN_VERSION:-__KUBELOGIN_VERSION__}"
 
-  # ========================================================================
-  # 3. Install kubelogin (for managed identity authentication)
-  # ========================================================================
-  - curl -LO https://github.com/Azure/kubelogin/releases/download/v0.0.37/kubelogin-linux-amd64.zip
-  - unzip -q kubelogin-linux-amd64.zip
-  - chmod +x bin/linux_amd64/kubelogin
-  - mv bin/linux_amd64/kubelogin /usr/local/bin/kubelogin
-  - rm -rf kubelogin-linux-amd64.zip bin/
+      exec > >(tee -a "${LOG_FILE}") 2>&1
 
-  # ========================================================================
-  # 4. Install Helm v3
-  # ========================================================================
-  - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      log() {
+        echo "[$(date --iso-8601=seconds)] $*"
+      }
 
-  # ========================================================================
-  # 5. Create deployment directory structure
-  # ========================================================================
-  - mkdir -p /opt/deploy
-  - mkdir -p /opt/deploy/logs
-  - mkdir -p /opt/deploy/employee-management-system
+      fail() {
+        log "ERROR: $*"
+        exit 1
+      }
 
-  # ========================================================================
-  # 6. Create the deployment script
-  # ========================================================================
+      on_error() {
+        local exit_code=$?
+        local line_no=$1
+        log "ERROR: Jump VM bootstrap failed at line ${line_no} with exit code ${exit_code}"
+        exit "${exit_code}"
+      }
 
-- cat > /opt/deploy/deploy.sh << 'DEPLOY_SCRIPT_EOF'
-#!/bin/bash
+      retry() {
+        local attempts=5
+        local delay=10
+        local n=1
 
-#################################################################################
-# Deploy Script for Private AKS Cluster via Managed Identity
-#
-# Usage:
-#   ./deploy.sh <resource_group> <aks_cluster_name> <image_tag> <acr_login_server>
-#
-# Parameters:
-#   - RESOURCE_GROUP: Azure resource group name
-#   - AKS_CLUSTER_NAME: AKS cluster name
-#   - IMAGE_TAG: Docker image tag (e.g., git commit SHA or 'latest')
-#   - ACR_LOGIN_SERVER: ACR login server (e.g., myacr.azurecr.io)
-#   - HELM_NAMESPACE: Kubernetes namespace for deployment (default: employee-management)
-#   - HELM_RELEASE: Helm release name (default: ems)
-#
-#################################################################################
+        until "$@"; do
+          if [ "${n}" -ge "${attempts}" ]; then
+            log "ERROR: command failed after ${attempts} attempts: $*"
+            return 1
+          fi
 
-set -e
+          log "Command failed. Retrying in ${delay}s (${n}/${attempts}): $*"
+          sleep "${delay}"
+          n=$((n + 1))
+        done
+      }
 
-# =========================================================================
-# Configuration
-# =========================================================================
-AZURE_SUBSCRIPTION_ID="${5:-}"
-RESOURCE_GROUP="${1:-}"
-AKS_CLUSTER_NAME="${2:-}"
-IMAGE_TAG="${3:-latest}"
-ACR_LOGIN_SERVER="${4:-}"
-HELM_NAMESPACE="${HELM_NAMESPACE:-employee-management}"
-HELM_RELEASE="${HELM_RELEASE:-employee-management-system}"
-HELM_CHART_PATH=/opt/deploy/employee-management-system
+      trap 'on_error $LINENO' ERR
 
-# Log file
-LOG_FILE="/opt/deploy/logs/deploy-$(date +%Y%m%d-%H%M%S).log"
+      wait_for_apt() {
+        log "Waiting for apt/dpkg locks to be released..."
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+              fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+              fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      }
 
-# =========================================================================
-# Helper Functions
-# =========================================================================
+      install_base_packages() {
+        log "Installing base packages..."
+        wait_for_apt
+        retry apt-get update -y
+        retry apt-get install -y --no-install-recommends \
+          apt-transport-https \
+          ca-certificates \
+          curl \
+          gpg \
+          git \
+          jq \
+          lsb-release \
+          software-properties-common \
+          unzip \
+          wget
+      }
 
-    log() 
-{
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
-}
-error() 
-{
-    echo "[ERROR] $*" | tee -a "$LOG_FILE" >&2
-    exit 1
-}
-validate_inputs() 
-{
-    log "Validating inputs..."
-    [[ -z "$AZURE_SUBSCRIPTION_ID" ]] && error "AZURE_SUBSCRIPTION_ID is required"
-    [[ -z "$RESOURCE_GROUP" ]] && error "RESOURCE_GROUP is required"
-    [[ -z "$AKS_CLUSTER_NAME" ]] && error "AKS_CLUSTER_NAME is required"
-    [[ -z "$ACR_LOGIN_SERVER" ]] && error "ACR_LOGIN_SERVER is required"
-    log "✓ All required parameters provided"
-}
+      install_azure_cli() {
+        log "Installing Azure CLI..."
+        install -d -m 0755 /etc/apt/keyrings
+        retry curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /tmp/microsoft.asc
+        gpg --dearmor < /tmp/microsoft.asc > /etc/apt/keyrings/microsoft.gpg
+        chmod 0644 /etc/apt/keyrings/microsoft.gpg
 
-# =========================================================================
-# Authentication using Managed Identity
-# =========================================================================
+        local distro
+        distro="$(lsb_release -cs)"
+        cat > /etc/apt/sources.list.d/azure-cli.sources <<EOF
+      Types: deb
+      URIs: https://packages.microsoft.com/repos/azure-cli/
+      Suites: ${distro}
+      Components: main
+      Architectures: amd64
+      Signed-By: /etc/apt/keyrings/microsoft.gpg
+      EOF
 
-authenticate_with_managed_identity()
-{
-    log "Authenticating with Managed Identity..."
-    
-    # Login using system-assigned managed identity (no parameters needed)
-    # The managed identity is automatically available on the VM
-    az login --identity \
-    --allow-no-subscriptions \
-    >/dev/null || \
-    error "Failed to authenticate"
+        wait_for_apt
+        retry apt-get update -y
+        retry apt-get install -y --no-install-recommends azure-cli
+      }
 
-    az account set \
-    --subscription "$AZURE_SUBSCRIPTION_ID" || \
-    error "Failed to set subscription"
-    
-    log "✓ Successfully authenticated with Managed Identity"
-}
-# =========================================================================
-# Get AKS Cluster Credentials
-# =========================================================================
+      install_kubectl() {
+        log "Installing kubectl ${KUBECTL_VERSION}..."
+        retry curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+        retry curl -fsSLo /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+        echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum --check
+        install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+      }
 
-get_aks_credentials() 
-{
-    log "Getting AKS cluster credentials for: $AKS_CLUSTER_NAME"
-    
-    # Create .kube directory if it doesn't exist
-    mkdir -p ~/.kube
-    
-    # Get admin credentials (since we have the AKS Cluster User role)
-    az aks get-credentials \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$AKS_CLUSTER_NAME" \
-        --overwrite-existing \
-        2>&1 | tee -a "$LOG_FILE" || \
-        error "Failed to get AKS credentials"
-    
-   log "✓ AKS credentials retrieved"
+      install_helm() {
+        log "Installing Helm 3..."
+        local expected_key_id="DDF78C3E6EBB2D2CC223C95C62BA89D07698DBC6"
+        local actual_key_id
 
-}
+        install -d -m 0755 /etc/apt/keyrings
+        retry curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey -o /tmp/helm.gpgkey
+        actual_key_id="$(gpg --show-keys --with-colons /tmp/helm.gpgkey | awk -F: '$1 == "fpr" {print $10}' | head -n 1)"
+        if [ "${actual_key_id}" != "${expected_key_id}" ]; then
+          fail "Unexpected Helm APT key fingerprint: ${actual_key_id}"
+        fi
 
-# =========================================================================
-# Convert kubeconfig with kubelogin (for Managed Identity auth)
-# =========================================================================
+        gpg --dearmor < /tmp/helm.gpgkey > /etc/apt/keyrings/helm.gpg
+        chmod 0644 /etc/apt/keyrings/helm.gpg
 
-configure_kubelogin() 
-{
-    log "Configuring kubelogin for managed identity authentication..."
-    
-    # Convert kubeconfig to use kubelogin exec plugin
-    # This enables authentication via the system-assigned managed identity
-    kubelogin convert-kubeconfig \
-        -l msi 2>&1 | tee -a "$LOG_FILE" || \
-        error "Failed to convert kubeconfig with kubelogin"
-    
-    log "✓ kubelogin configured successfully"
-}
+        cat > /etc/apt/sources.list.d/helm-stable-debian.sources <<EOF
+      Types: deb
+      URIs: https://packages.buildkite.com/helm-linux/helm-debian/any/
+      Suites: any
+      Components: main
+      Signed-By: /etc/apt/keyrings/helm.gpg
+      EOF
 
-# =========================================================================
-# Verify Cluster Connectivity
-# =========================================================================
+        wait_for_apt
+        retry apt-get update -y
+        retry apt-get install -y --no-install-recommends helm
+      }
 
-verify_cluster_connectivity() 
-{
-    log "Verifying connectivity to AKS cluster..."
-    
-    kubectl cluster-info 2>&1 | tee -a "$LOG_FILE" || \
-        error "Failed to connect to AKS cluster"
-    
-    log "✓ Successfully connected to AKS cluster"
-}
-# =========================================================================
-# Create Kubernetes Namespace
-# =========================================================================
+      install_kubelogin() {
+        log "Installing kubelogin ${KUBELOGIN_VERSION}..."
+        retry curl -fsSLo /tmp/kubelogin.zip "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip"
+        retry curl -fsSLo /tmp/kubelogin.zip.sha256 "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip.sha256"
+        local expected_sha
+        expected_sha="$(sed -E 's/^sha256://; s/[[:space:]].*$//' /tmp/kubelogin.zip.sha256)"
+        echo "${expected_sha}  /tmp/kubelogin.zip" | sha256sum --check
 
-create_namespace() 
-{
-    log "Ensuring namespace '$HELM_NAMESPACE' exists..."
-    
-    kubectl create namespace "$HELM_NAMESPACE" --dry-run=client -o yaml | \
-        kubectl apply -f - 2>&1 | tee -a "$LOG_FILE"
-    
-    log "✓ Namespace ready: $HELM_NAMESPACE"
+        rm -rf /tmp/kubelogin
+        mkdir -p /tmp/kubelogin
+        unzip -q /tmp/kubelogin.zip -d /tmp/kubelogin
+        install -m 0755 /tmp/kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/kubelogin
+      }
 
-}
+      configure_jumpvm_profile() {
+        log "Configuring Jump VM profile and helper scripts..."
+        mkdir -p /opt/deploy/logs
 
-# =========================================================================
-# Deploy Application using Helm
-# =========================================================================
+        cat > /etc/profile.d/aks-tools.sh <<'EOF'
+      export PATH="/opt/deploy:/usr/local/bin:$PATH"
+      alias k='kubectl'
+      alias h='helm'
+      alias kgp='kubectl get pods'
+      alias kdesc='kubectl describe'
+      alias klogs='kubectl logs'
+      EOF
 
-deploy_with_helm() 
-{
-    log "Deploying application with Helm (Release: employee-management-system)..."
-    
-    # Check if Helm chart path exists
-    if [[ ! -d "$HELM_CHART_PATH" ]]; then
-        error "Helm chart not found at: $HELM_CHART_PATH"
-    fi
-    
-    # Helm upgrade with install flag (create if not exists, update if exists)
-    # Set image tag and ACR login server as Helm values
-    helm upgrade --install employee-management-system \
-    "$HELM_CHART_PATH" \
-    --namespace employee-management \
-    --set backend.image.repository="$ACR_LOGIN_SERVER/ems-backend" \
-    --set backend.image.tag="$IMAGE_TAG" \
-    --set frontend.image.repository="$ACR_LOGIN_SERVER/ems-frontend" \
-    --set frontend.image.tag="$IMAGE_TAG" \
-    --set acr.loginServer="$ACR_LOGIN_SERVER" \
-    --wait --atomic \
-    --timeout 10m \
-    2>&1 | tee -a "$LOG_FILE" || \
-    error "Helm deployment failed"
-    
-    log "✓ Application deployed successfully"
-}
+        cat > /opt/deploy/get-kubeconfig.sh <<'EOF'
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
 
-# =========================================================================
-# Verify Deployment
-# =========================================================================
+      RESOURCE_GROUP="${1:?Usage: get-kubeconfig.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      AKS_CLUSTER_NAME="${2:?Usage: get-kubeconfig.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      SUBSCRIPTION_ID="${3:-}"
 
-verify_deployment() 
-{
-    log "Verifying deployment..."
-    
-    # Wait for deployments to be ready
-    kubectl rollout status deployment/ems-backend \
-        -n "$HELM_NAMESPACE" \
-        --timeout=5m 2>&1 | tee -a "$LOG_FILE"
-    
-    kubectl rollout status deployment/ems-frontend \
-        -n "$HELM_NAMESPACE" \
-        --timeout=5m 2>&1 | tee -a "$LOG_FILE"
-    
-    log "✓ Deployment verification complete"
-    
-    # Show deployment summary
-    log "========================================="
-    log "Deployment Summary:"
-    log "========================================="
-    kubectl get all -n "$HELM_NAMESPACE" 2>&1 | tee -a "$LOG_FILE"
+      az login --identity --allow-no-subscriptions >/dev/null
+      if [ -n "${SUBSCRIPTION_ID}" ]; then
+        az account set --subscription "${SUBSCRIPTION_ID}"
+      fi
 
-}
-# =========================================================================
-# Main Execution Flow
-# =========================================================================
-
-main() 
-{
-    log "========================================="
-    log "AKS Deployment Script Started"
-    log "========================================="
-    log "Configuration:"
-    log "  Resource Group: $RESOURCE_GROUP"
-    log "  AKS Cluster: $AKS_CLUSTER_NAME"
-    log "  Image Tag: $IMAGE_TAG"
-    log "  ACR Server: $ACR_LOGIN_SERVER"
-    log "  Helm Namespace: $HELM_NAMESPACE"
-    log "  Helm Release: $HELM_RELEASE"
-    log "========================================="
-    
-    validate_inputs
-    authenticate_with_managed_identity
-    get_aks_credentials
-    configure_kubelogin
-    verify_cluster_connectivity
-    create_namespace
-    deploy_with_helm
-    verify_deployment
-    
-    log "========================================="
-    log "✓ Deployment completed successfully!"
-    log "========================================="
-
-}
-# Execute main function and capture exit code
-main
-EXIT_CODE=$?
-
-log "Script execution completed with exit code: $EXIT_CODE"
-exit $EXIT_CODE
-
-DEPLOY_SCRIPT_EOF
-
-  # Make deploy script executable
-  - chmod +x /opt/deploy/deploy.sh
-  - chown root:root /opt/deploy/deploy.sh
-
-#   # ========================================================================
-#   # 7. Create systemd service file for easy deployment invocation
-#   # ========================================================================
-#   - cat > /etc/systemd/system/aks-deploy.service << 'SYSTEMD_EOF'
-# [Unit]
-# Description=AKS Deployment Service
-# After=network.target
-
-# [Service]
-# Type=oneshot
-# RemainAfterExit=yes
-
-# [Install]
-# WantedBy=multi-user.target
-# SYSTEMD_EOF
-
-  # ========================================================================
-  # 8. Create bashrc profile for convenient CLI usage
-  # ========================================================================
-  - cat >> /etc/profile.d/aks-tools.sh << 'PROFILE_EOF'
-# AKS Deployment Tools Profile
-export PATH="/opt/deploy:$PATH"
-export KUBECONFIG="$HOME/.kube/config"
-
-# Helpful aliases
-alias k='kubectl'
-alias h='helm'
-alias kdesc='kubectl describe'
-alias klogs='kubectl logs'
-alias kgp='kubectl get pods'
-PROFILE_EOF
-
-  # ========================================================================
-  # 9. Configure Azure CLI for managed identity authentication
-  # ========================================================================
-  - mkdir -p /root/.azure
-
-- |
-    cat > /root/.azure/az-env.sh << 'AZENV_EOF'
-    #!/bin/bash
-    az login --identity 2>/dev/null || true
-    AZENV_EOF
-
-- chmod +x /root/.azure/az-env.sh
-
-  # ========================================================================
-  # 10. Create helper scripts for common operations
-  # ========================================================================
-- |
-      cat > /opt/deploy/deploy.sh << 'DEPLOY_SCRIPT_EOF'
-      #!/bin/bash
-
-    RESOURCE_GROUP="$1"
-    AKS_CLUSTER_NAME="$2"
-
-    az aks get-credentials \
-        --resource-group "$RESOURCE_GROUP" \
-        --name "$AKS_CLUSTER_NAME" \
+      az aks get-credentials \
+        --resource-group "${RESOURCE_GROUP}" \
+        --name "${AKS_CLUSTER_NAME}" \
         --overwrite-existing
 
-    kubelogin convert-kubeconfig -l msi
-    KUBECONFIG_EOF
+      kubelogin convert-kubeconfig -l msi
+      kubectl cluster-info
+      EOF
 
-- chmod +x /opt/deploy/get-kubeconfig.sh
-#!/bin/bash
-# Helper script to refresh kubeconfig
+        chmod 0755 /opt/deploy/get-kubeconfig.sh
+      }
 
-RESOURCE_GROUP="$1"
-AKS_CLUSTER_NAME="$2"
+      validate_installation() {
+        log "Validating installed tools..."
+        command -v az >/dev/null || fail "az was not installed"
+        command -v kubectl >/dev/null || fail "kubectl was not installed"
+        command -v helm >/dev/null || fail "helm was not installed"
+        command -v kubelogin >/dev/null || fail "kubelogin was not installed"
+        command -v jq >/dev/null || fail "jq was not installed"
+        command -v unzip >/dev/null || fail "unzip was not installed"
+        command -v git >/dev/null || fail "git was not installed"
 
-az aks get-credentials \
-    --resource-group "$RESOURCE_GROUP" \
-    --name "$AKS_CLUSTER_NAME" \
-    --overwrite-existing
-kubelogin convert-kubeconfig -l msi
-KUBECONFIG_EOF
+        az version
+        kubectl version --client
+        helm version
+        kubelogin --version
+        jq --version
+        unzip -v | head -n 2
+        git --version
+      }
 
-  - chmod +x /opt/deploy/get-kubeconfig.sh
+      main() {
+        log "Starting Jump VM bootstrap for private AKS administration"
+        install_base_packages
+        install_azure_cli
+        install_kubectl
+        install_helm
+        install_kubelogin
+        configure_jumpvm_profile
+        validate_installation
+        log "Jump VM bootstrap completed successfully"
+      }
 
-  # ========================================================================
-  # 11. Verify installations
-  # ========================================================================
-  - echo "Verifying installed tools..."
-  - az --version || true
-  - kubectl version --client || true
-  - kubelogin --version || true
-  - helm version || true
-  - jq --version
+      main "$@"
 
-  # ========================================================================
-  # 12. Final message
-  # ========================================================================
-  - echo "========================================="
-  - echo "Jump VM Setup Complete!"
-  - echo "========================================="
-  - echo "Deployed tools:"
-  - echo "  ✓ Azure CLI"
-  - echo "  ✓ kubectl"
-  - echo "  ✓ kubelogin"
-  - echo "  ✓ Helm v3"
-  - echo "  ✓ jq, unzip"
-  - echo ""
-  - echo "Deployment script available at:"
-  - echo "  /opt/deploy/deploy.sh"
-  - echo ""
-  - echo "Managed Identity enabled for passwordless authentication"
-  - echo "========================================="
+runcmd:
+  - [bash, -lc, "/usr/local/sbin/bootstrap-jumpvm.sh"]
 
-final_message: "Jump VM initialization completed. System ready for AKS deployment via Managed Identity."
+final_message: "Jump VM initialization completed. AKS tooling bootstrap succeeded."
