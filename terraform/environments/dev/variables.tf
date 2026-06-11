@@ -86,6 +86,7 @@ variable "jumpvm_subnet_name" {
 variable "jumpvm_subnet_address_prefixes" {
   description = "Address prefixes for Jump VM subnet"
   type        = list(string)
+  default     = ["10.1.4.0/24"]
 }
 
 variable "postgres_subnet_name" {
