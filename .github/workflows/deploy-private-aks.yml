@@ -236,17 +236,15 @@ jobs:
           echo "aks_cluster=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
           echo "acr_server=${ACR_LOGIN_SERVER}" >> $GITHUB_OUTPUT
 
-      - name: Deploy via Jump VM - Copy Helm Chart
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            apk add --no-cache tar
+      - name: Prepare deployment artifacts
+        run: |
 
             echo "📦 Preparing deployment artifacts..."
 
             mkdir -p deploy-pkg
             cp -r ./helm/employee-management-system deploy-pkg/
             tar -czf deploy-artifacts.tar.gz deploy-pkg/
+
 
             echo "Helm chart prepared for deployment"
 
