@@ -272,7 +272,7 @@ jobs:
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
             # Construct the deployment command
-            DEPLOY_COMMAND="/opt/deploy/deploy.sh ${RESOURCE_GROUP} ${AKS_CLUSTER} ${IMAGE_TAG} ${ACR_SERVER}"
+            DEPLOY_COMMAND="/opt/deploy/deploy.sh ${RESOURCE_GROUP} ${AKS_CLUSTER} ${IMAGE_TAG} ${ACR_SERVER} ${{ env.AZURE_SUBSCRIPTION_ID }}"
             
             echo "📡 Invoking deployment script on Jump VM..."
             
