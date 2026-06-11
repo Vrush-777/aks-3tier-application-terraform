@@ -237,15 +237,14 @@ jobs:
         uses: azure/CLI@v1
         with:
           inlineScript: |
-            # Copy Helm chart to Jump VM
+            apk add --no-cache tar
+
             echo "📦 Preparing deployment artifacts..."
-            
-            # Create deployment package
+
             mkdir -p deploy-pkg
             cp -r ./helm/employee-management-system deploy-pkg/
             tar -czf deploy-artifacts.tar.gz deploy-pkg/
-            
-            # Upload to Jump VM (via Azure VM Run Command with file staging)
+
             echo "Helm chart prepared for deployment"
 
       - name: Deploy via Jump VM - Run Command
