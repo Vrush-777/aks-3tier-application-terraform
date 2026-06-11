@@ -6,7 +6,15 @@ on:
       - Terraform Infrastructure Pipeline
     types:
       - completed
-  # Allow manual trigger for testing
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'ems-backend/**'
+      - 'ems-fullstack/**'
+      - 'helm/**'
+
   workflow_dispatch:
 
 env:
@@ -113,7 +121,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./ems-backend
-          file: ./ems-backend/docker/backend.Dockerfile
+          file: ./docker/backend.Dockerfile
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ steps.image-tag.outputs.tag }}
@@ -178,7 +186,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./ems-fullstack
-          file: ./ems-fullstack/docker/frontend.Dockerfile
+          file: ./docker/frontend.Dockerfile
           push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ steps.image-tag.outputs.tag }}
