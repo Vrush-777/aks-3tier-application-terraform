@@ -154,7 +154,7 @@ module "jump_vm" {
   location            = module.resource_group.location
   prefix              = var.resource_group_name
   admin_username      = var.jumpvm_admin_username
-  ssh_public_key      = var.jumpvm_ssh_public_key != "" ? var.jumpvm_ssh_public_key : file(pathexpand(var.jumpvm_ssh_public_key_path))
+  ssh_public_key      = var.jumpvm_ssh_public_key
   vm_size             = var.jumpvm_vm_size
   subnet_id           = module.network.jumpvm_subnet_id
   nsg_id              = module.nsg.jumpvm_nsg_id

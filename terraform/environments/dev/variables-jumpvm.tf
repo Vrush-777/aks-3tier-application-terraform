@@ -19,11 +19,11 @@ variable "jumpvm_ssh_public_key" {
   # TF_VAR_jumpvm_ssh_public_key
 }
 
-variable "jumpvm_ssh_public_key_path" {
-  type        = string
-  description = "Local SSH public key path used when jumpvm_ssh_public_key is not provided."
-  default     = "~/.ssh/id_rsa.pub"
-}
+# variable "jumpvm_ssh_public_key_path" {
+#   type        = string
+#   description = "Local SSH public key path used when jumpvm_ssh_public_key is not provided."
+#   default     = "~/.ssh/id_rsa.pub"
+# }
 
 variable "jumpvm_vm_size" {
   type        = string

@@ -29,6 +29,7 @@ env:
   TF_VAR_appgw_name: ${{ secrets.TF_VAR_appgw_name }}
   TF_VAR_aks_cluster_name: ${{ secrets.TF_VAR_aks_cluster_name }}
   TF_VAR_jumpvm_subnet_address_prefixes: ${{ secrets.TF_VAR_jumpvm_subnet_address_prefixes }}
+  TF_VAR_jumpvm_ssh_public_key: ${{ secrets.TF_VAR_jumpvm_ssh_public_key }}
 
 jobs:
   terraform-validation:
