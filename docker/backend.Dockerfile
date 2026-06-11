@@ -4,13 +4,13 @@ FROM maven:3.9-eclipse-temurin-21-alpine AS maven-builder
 WORKDIR /build
 
 # Copy pom.xml for dependency resolution (better layer caching)
-COPY ems-backend/pom.xml .
+COPY pom.xml .
 
 # Download Maven dependencies offline (cached layer)
 RUN mvn dependency:go-offline -B
 
 # Copy source code
-COPY ems-backend/src ./src
+COPY src src
 
 # Build application with optimizations
 RUN mvn clean package -DskipTests -q

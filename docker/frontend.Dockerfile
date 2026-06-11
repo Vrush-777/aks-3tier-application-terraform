@@ -8,13 +8,13 @@ LABEL description="EMS Frontend - React UI Build Stage"
 WORKDIR /build
 
 # Install dependencies
-COPY ems-fullstack/package*.json ./
+COPY package*.json ./
 
 # Clean npm cache and install production dependencies with optimizations
 RUN npm ci --prefer-offline --no-audit
 
 # Copy source code
-COPY ems-fullstack/ .
+COPY . .
 
 # Build optimized production bundle with Vite
 RUN npm run build
@@ -35,7 +35,7 @@ RUN addgroup -S www-user && adduser -S nginx-user -G www-user || true
 RUN rm -f /etc/nginx/conf.d/default.conf
 
 # Copy custom Nginx configuration for SPA routing
-COPY ems-fullstack/nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy built application from builder stage
 COPY --from=node-builder /build/dist /usr/share/nginx/html
