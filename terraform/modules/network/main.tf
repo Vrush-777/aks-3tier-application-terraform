@@ -27,7 +27,7 @@ resource "azurerm_subnet" "aks_subnet" {
   service_endpoints = ["Microsoft.KeyVault", "Microsoft.Sql", "Microsoft.Storage"]
 
   # Enable private endpoint network policies
-  private_endpoint_network_policies = "enabled"
+  private_endpoint_network_policies = "Enabled"
 }
 
 # Application Gateway Subnet
