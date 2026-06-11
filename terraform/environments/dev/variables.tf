@@ -77,6 +77,17 @@ variable "appgw_subnet_address_prefixes" {
   default     = ["10.1.2.0/24"]
 }
 
+variable "jumpvm_subnet_name" {
+  description = "Jump VM subnet name"
+  type        = string
+  default     = "jumpvm-subnet"
+}
+
+variable "jumpvm_subnet_address_prefixes" {
+  description = "Address prefixes for Jump VM subnet"
+  type        = list(string)
+}
+
 variable "postgres_subnet_name" {
   description = "Name of the PostgreSQL subnet"
   type        = string

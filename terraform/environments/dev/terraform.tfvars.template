@@ -1,0 +1,76 @@
+# Configuration Template for terraform.tfvars
+# File Location: terraform/environments/dev/terraform.tfvars
+
+# ============================================================================
+# Existing Configuration (Keep Your Current Values)
+# ============================================================================
+# These are your existing terraform.tfvars variables - do not modify
+
+# subscription_id      = "your-subscription-id"
+# tenant_id            = "your-tenant-id"
+# resource_group_name  = "ems-rg-dev"
+# location             = "eastus"
+# prefix               = "ems"
+# common_tags = {
+#   Environment = "dev"
+#   Project     = "EmployeeManagementSystem"
+# }
+
+# ============================================================================
+# Jump VM Configuration (ADD THESE)
+# ============================================================================
+
+# Jump VM admin username for SSH access
+jumpvm_admin_username = "azureuser"
+
+# Jump VM size - Standard_B2s is sufficient for dev
+# For production, consider Standard_D2s_v3 or larger
+jumpvm_vm_size = "Standard_D2s_v3"
+
+# Jump VM enable flag - set to false to disable Jump VM deployment
+jumpvm_enable = true
+
+# SSH public key for Jump VM authentication
+# This will be provided via GitHub Actions secrets: TF_VAR_jumpvm_ssh_public_key
+# You can also manually set it here for local Terraform runs:
+# jumpvm_ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2E... your-key@your-computer"
+
+# Optional: Jump VM NSG rules
+# jumpvm_nsg_rules can be customized here if needed
+# jumpvm_nsg_rules = {
+#   "AllowSSH" = {
+#     priority                   = 100
+#     direction                  = "Inbound"
+#     access                     = "Allow"
+#     protocol                   = "Tcp"
+#     source_port_range          = "*"
+#     destination_port_range     = "22"
+#     source_address_prefix      = "*"  # Restrict for production!
+#     destination_address_prefix = "*"
+#   }
+# }
+
+# ============================================================================
+# Managed Identity Settings (Automatic - No Config Needed)
+# ============================================================================
+
+# The following are automatically configured:
+# - System Assigned Managed Identity for Jump VM
+# - Role: AKS Cluster User on the AKS cluster
+# - Role: Reader on the resource group
+# - Role: AcrPull on the Container Registry
+# No manual configuration needed - these are handled by Terraform modules
+
+# ============================================================================
+# Notes
+# ============================================================================
+
+# For GitHub Actions:
+# 1. Add jumpvm_ssh_public_key via GitHub Secrets: TF_VAR_jumpvm_ssh_public_key
+# 2. The cloud-init script will automatically install all required tools
+# 3. The deployment script will be created at /opt/deploy/deploy.sh
+
+# For Local Development:
+# 1. Uncomment jumpvm_ssh_public_key line above with your SSH public key
+# 2. Run: terraform apply
+# 3. Retrieve outputs: terraform output

@@ -27,7 +27,7 @@ resource "azurerm_subnet" "aks_subnet" {
   service_endpoints = ["Microsoft.KeyVault", "Microsoft.Sql", "Microsoft.Storage"]
 
   # Enable private endpoint network policies
-  private_endpoint_network_policies_enabled = true
+  private_endpoint_network_policies = "Enabled"
 }
 
 # Application Gateway Subnet
@@ -36,6 +36,16 @@ resource "azurerm_subnet" "appgw_subnet" {
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.appgw_subnet_address_prefixes
+}
+
+# Jump VM Subnet
+resource "azurerm_subnet" "jumpvm_subnet" {
+  name                 = var.jumpvm_subnet_name
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = var.jumpvm_subnet_address_prefixes
+
+  service_endpoints = ["Microsoft.KeyVault", "Microsoft.Storage"]
 }
 
 # PostgreSQL Delegated Subnet
@@ -55,7 +65,7 @@ resource "azurerm_subnet" "postgres_subnet" {
     }
   }
 
-  private_endpoint_network_policies_enabled = false
+  private_endpoint_network_policies = "Disabled"
 }
 
 # Network Security Group for AKS

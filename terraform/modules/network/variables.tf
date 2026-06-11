@@ -18,7 +18,7 @@ variable "vnet_name" {
 variable "address_space" {
   description = "Address space for the virtual network (CIDR)"
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  default     = ["10.1.0.0/16"]
 }
 
 variable "aks_subnet_name" {
@@ -43,6 +43,17 @@ variable "appgw_subnet_address_prefixes" {
   description = "Address prefixes for Application Gateway subnet"
   type        = list(string)
   default     = ["10.1.2.0/24"]
+}
+
+variable "jumpvm_subnet_name" {
+  description = "Name of the Jump VM subnet"
+  type        = string
+  default     = "jumpvm-subnet"
+}
+
+variable "jumpvm_subnet_address_prefixes" {
+  description = "Address prefixes for Jump VM subnet"
+  type        = list(string)
 }
 
 variable "postgres_subnet_name" {

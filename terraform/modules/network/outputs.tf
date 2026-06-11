@@ -30,6 +30,16 @@ output "appgw_subnet_name" {
   value       = azurerm_subnet.appgw_subnet.name
 }
 
+output "jumpvm_subnet_id" {
+  description = "ID of the Jump VM subnet"
+  value       = azurerm_subnet.jumpvm_subnet.id
+}
+
+output "jumpvm_subnet_name" {
+  description = "Name of the Jump VM subnet"
+  value       = azurerm_subnet.jumpvm_subnet.name
+}
+
 output "aks_nsg_id" {
   description = "ID of the AKS Network Security Group"
   value       = azurerm_network_security_group.aks_nsg.id

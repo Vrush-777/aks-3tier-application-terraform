@@ -68,6 +68,8 @@ module "network" {
   aks_subnet_address_prefixes      = var.aks_subnet_address_prefixes
   appgw_subnet_name                = var.appgw_subnet_name
   appgw_subnet_address_prefixes    = var.appgw_subnet_address_prefixes
+  jumpvm_subnet_name               = var.jumpvm_subnet_name
+  jumpvm_subnet_address_prefixes   = var.jumpvm_subnet_address_prefixes
   postgres_subnet_name             = var.postgres_subnet_name
   postgres_subnet_address_prefixes = var.postgres_subnet_address_prefixes
   create_postgres_subnet           = var.create_postgres_subnet
@@ -77,6 +79,16 @@ module "network" {
   aks_route_table_name             = var.aks_route_table_name
   common_tags                      = var.common_tags
 }
+
+module "nsg" {
+  source         = "../../modules/nsg"
+  prefix         = var.resource_group_name
+  resource_group = module.resource_group.resource_group_name
+  location       = module.resource_group.location
+  user_public_ip = var.jumpvm_ssh_source_address_prefix
+  tags           = var.common_tags
+}
+
 
 # Azure Container Registry
 module "acr" {
@@ -133,6 +145,27 @@ module "managed_identity" {
   kubelet_identity_name = var.kubelet_identity_name
   acr_id                = module.acr.acr_id
   common_tags           = var.common_tags
+}
+
+module "jump_vm" {
+  source              = "../../modules/vm"
+  resource_group_name = module.resource_group.resource_group_name
+  resource_group_id   = module.resource_group.resource_group_id
+  location            = module.resource_group.location
+  prefix              = var.resource_group_name
+  admin_username      = var.jumpvm_admin_username
+  ssh_public_key      = var.jumpvm_ssh_public_key != "" ? var.jumpvm_ssh_public_key : file(pathexpand(var.jumpvm_ssh_public_key_path))
+  vm_size             = var.jumpvm_vm_size
+  subnet_id           = module.network.jumpvm_subnet_id
+  nsg_id              = module.nsg.jumpvm_nsg_id
+  aks_cluster_id      = module.aks.aks_id
+  acr_id              = module.acr.acr_id
+  tags                = var.common_tags
+
+  depends_on = [
+    module.aks,
+    module.nsg
+  ]
 }
 
 # Application Gateway
