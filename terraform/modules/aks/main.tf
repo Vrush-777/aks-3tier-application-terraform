@@ -2,6 +2,30 @@
 # Creates a private AKS cluster with managed identity and AGIC support
 
 resource "azurerm_kubernetes_cluster" "aks" {
+  # ==========================================================================
+  # SAFETY CHECK: AKS MUST NOT BE DEPLOYED WITHOUT ENTRA ADMIN GROUPS
+  # ==========================================================================
+  # This lifecycle precondition is a hard runtime guard. Even if Terraform
+  # validation passes at plan time, this ensures the apply itself fails if
+  # admin_group_object_ids is somehow empty at runtime.
+  #
+  # This prevents the scenario where AKS is deployed but has NO Entra
+  # administrator groups configured, leaving the cluster unmanageable
+  # (local accounts are disabled, and no admins can authenticate).
+  lifecycle {
+    precondition {
+      condition     = length(var.admin_group_object_ids) > 0
+      error_message = <<-EOT
+        Fatal: AKS cluster cannot be deployed without Entra administrator groups.
+        Either:
+          1. Set aks_admin_group_object_ids in terraform.tfvars with at least one Entra group Object ID, OR
+          2. Set create_admin_group = true to let Terraform create the group.
+        Without this, the cluster will be deployed with NO administrative access,
+        and no one will be able to run kubectl commands against it.
+      EOT
+    }
+  }
+
   name                = var.aks_cluster_name
   location            = var.location
   resource_group_name = var.resource_group_name

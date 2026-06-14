@@ -492,6 +492,21 @@ variable "aks_admin_group_object_ids" {
   description = "Azure AD group object IDs for AKS admin access. If create_admin_group is true, this is auto-populated. Otherwise, provide existing group Object ID(s)."
   type        = list(string)
   default     = []
+
+  validation {
+    condition = (
+      var.create_admin_group == true ||
+      length(var.aks_admin_group_object_ids) > 0
+    )
+    error_message = <<EOT
+At least one Entra admin group Object ID is required when create_admin_group is false.
+Either:
+  - Set create_admin_group = true to have Terraform create the group, OR
+  - Provide at least one Object ID in aks_admin_group_object_ids (recommended).
+Without this, AKS will have NO administrator access via Entra ID, making the cluster
+unmanageable (local accounts are disabled).
+EOT
+  }
 }
 
 variable "aks_enable_azure_policy" {

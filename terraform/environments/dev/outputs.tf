@@ -175,6 +175,34 @@ output "kube_config" {
 # Managed Identity Outputs
 # ============================================================================
 
+# ============================================================================
+# Microsoft Entra Admin Group Outputs
+# ============================================================================
+
+output "aks_admin_group_ids" {
+  description = "List of configured Entra administrator group Object IDs for AKS."
+  value       = local.aks_admin_group_ids
+}
+
+output "create_admin_group" {
+  description = "Whether Terraform is configured to create an Entra admin group."
+  value       = var.create_admin_group
+}
+
+output "admin_group_name" {
+  description = "Name of the Entra admin group (when created by Terraform)."
+  value       = var.create_admin_group ? var.admin_group_name : null
+}
+
+output "admin_groups_configured" {
+  description = "Boolean indicating whether at least one admin group Object ID is configured."
+  value       = length(local.aks_admin_group_ids) > 0
+}
+
+# ============================================================================
+# Managed Identity Outputs
+# ============================================================================
+
 output "aks_managed_identity_id" {
   description = "ID of the AKS managed identity"
   value       = module.managed_identity.aks_identity_id

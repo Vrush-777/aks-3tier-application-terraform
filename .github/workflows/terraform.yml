@@ -218,9 +218,104 @@ jobs:
 
       - name: Capture Outputs
         run: |
-          echo "aks_cluster_name=$(terraform output -raw aks_cluster_name)" >> $GITHUB_ENV
-          echo "acr_login_server=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
-          echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_ENV
+          echo "AKS_CLUSTER=$(terraform output -raw aks_cluster_name)" >> $GITHUB_ENV
+          echo "ACR_LOGIN=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=$(terraform output -raw resource_group_name)" >> $GITHUB_ENV
+          echo "ADMIN_GROUPS_CONFIGURED=$(terraform output -raw admin_groups_configured)" >> $GITHUB_ENV
+
+      # =====================================================================
+      # CRITICAL: Validate AKS Entra Admin Groups After Apply
+      # =====================================================================
+      # This step verifies that the AKS cluster has Entra administrator
+      # groups configured in its AAD profile. If adminGroupObjectIDs is
+      # null or empty, the pipeline FAILS immediately.
+      #
+      # Why this is necessary:
+      #   Even though Terraform validation and lifecycle preconditions
+      #   guard against this, a race condition or partial state update
+      #   could leave AKS without admin access. This post-apply check
+      #   is the final layer of defense.
+      #
+      # The pipeline MUST fail if:
+      #   - adminGroupObjectIDs is null
+      #   - adminGroupObjectIDs is an empty array
+      # =====================================================================
+      - name: Validate AKS Entra Admin Groups
+        id: validate-admin-groups
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "🔐 AKS Entra Admin Group Validation"
+          echo "=========================================="
+          echo "Cluster:      ${AKS_CLUSTER}"
+          echo "Resource Grp: ${RESOURCE_GROUP}"
+          echo "=========================================="
+          echo ""
+
+          # Query the AAD profile directly from Azure
+          ADMIN_GROUP_IDS=$(az aks show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${AKS_CLUSTER}" \
+            --query "aadProfile.adminGroupObjectIDs" \
+            --output json 2>/dev/null) || {
+              echo "❌ FAILED: Unable to query AKS AAD profile."
+              echo "   The cluster may not exist or is not accessible."
+              exit 1
+          }
+
+          echo "Raw result: ${ADMIN_GROUP_IDS}"
+          echo ""
+
+          # Check for null
+          if [[ "${ADMIN_GROUP_IDS}" == "null" ]]; then
+            echo "=========================================="
+            echo "❌ CRITICAL FAILURE: AKS Entra admin groups"
+            echo "   are NULL. The cluster has NO configured"
+            echo "   administrators."
+            echo "=========================================="
+            echo ""
+            echo "Root cause:"
+            echo "  az aadProfile.adminGroupObjectIDs returned null."
+            echo "  This means the Entra integration was created"
+            echo "  without any admin groups."
+            echo ""
+            echo "Resolution:"
+            echo "  1. Ensure aks_admin_group_object_ids is set in"
+            echo "     terraform.tfvars with at least one Object ID."
+            echo "  2. Run: terraform apply"
+            echo "  3. Re-run this pipeline."
+            exit 2
+          fi
+
+          # Check for empty array
+          if [[ "${ADMIN_GROUP_IDS}" == "[]" ]]; then
+            echo "=========================================="
+            echo "❌ CRITICAL FAILURE: AKS Entra admin groups"
+            echo "   are EMPTY."
+            echo "=========================================="
+            exit 2
+          fi
+
+          # Success
+          echo "=========================================="
+          echo "✅ AKS Entra admin groups are configured."
+          echo "   Admin group count: $(echo ${ADMIN_GROUP_IDS} | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 'unknown')"
+          echo "=========================================="
+
+      # =====================================================================
+      # Terraform Output Summary
+      # =====================================================================
+      - name: Terraform Output Summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ TERRAFORM APPLY COMPLETED SUCCESSFULLY"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "AKS Cluster:            ${{ env.AKS_CLUSTER }}"
+          echo "Resource Group:         ${{ env.RESOURCE_GROUP }}"
+          echo "ACR Login Server:       ${{ env.ACR_LOGIN }}"
+          echo "Admin Groups Configured: ${{ env.ADMIN_GROUPS_CONFIGURED }}"
+          echo ""
 
       - name: Upload Terraform State
         uses: actions/upload-artifact@v4
