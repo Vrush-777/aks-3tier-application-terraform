@@ -62,15 +62,59 @@ jumpvm_enable = true
 # No manual configuration needed - these are handled by Terraform modules
 
 # ============================================================================
+# Microsoft Entra Group-Based AKS Administration (NEW)
+# ============================================================================
+#
+# AKS now uses Microsoft Entra group-based administration instead of
+# managed-identity-based admin access. This provides:
+#
+#   - Individual user authentication via Entra ID
+#   - No need for --admin flag or cluster-admin bindings
+#   - Audit trail of who performed which kubectl action
+#   - Azure RBAC integration for Kubernetes
+#
+# Option A: Use an EXISTING Entra group (recommended)
+#   Set create_admin_group = false (default) and provide the Object ID:
+#
+#     aks_admin_group_object_ids = ["11111111-2222-3333-4444-555555555555"]
+#
+#   To find your Entra group Object ID:
+#     az ad group show --group "aks-admins" --query id -o tsv
+#
+# Option B: Let Terraform CREATE a new Entra group (behind feature flag)
+#   Set create_admin_group = true and customize group settings:
+#
+#     create_admin_group        = true
+#     admin_group_name          = "aks-admins"
+#     admin_group_description   = "AKS administrators group"
+#
+#   IMPORTANT: When create_admin_group is true, aks_admin_group_object_ids
+#   is automatically populated with the created group's Object ID.
+#
+# For both options, ensure AKS administrators are added as members of the
+# group. Then from the Jump VM:
+#
+#   az login --use-device-code
+#   az aks get-credentials --resource-group <rg> --name <cluster>
+#   kubelogin convert-kubeconfig -l azurecli
+#   kubectl get nodes
+#
+# The Jump VM now includes a helper script:
+#   /opt/deploy/aks-admin-login.sh <resource-group> <cluster> [subscription-id]
+
+# ============================================================================
 # Notes
 # ============================================================================
 
 # For GitHub Actions:
 # 1. Add jumpvm_ssh_public_key via GitHub Secrets: TF_VAR_jumpvm_ssh_public_key
-# 2. The cloud-init script will automatically install all required tools
-# 3. The deployment script will be created at /opt/deploy/deploy.sh
+# 2. The cloud-init script will automatically install all required tools (Azure CLI, kubectl, kubelogin, Helm)
+# 3. The helper script is created at /opt/deploy/aks-admin-login.sh
+# 4. Existing workflows (deploy-private-aks.yml) remain compatible
 
 # For Local Development:
 # 1. Uncomment jumpvm_ssh_public_key line above with your SSH public key
-# 2. Run: terraform apply
-# 3. Retrieve outputs: terraform output
+# 2. Ensure your Entra user is a member of the AKS admin group
+# 3. Run: terraform apply
+# 4. Retrieve outputs: terraform output
+# 5. SSH into Jump VM and run: ./aks-admin-login.sh <rg> <cluster> <subscription>

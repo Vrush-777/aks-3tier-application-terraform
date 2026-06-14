@@ -466,8 +466,30 @@ variable "aks_private_dns_zone_id" {
   default     = "System"
 }
 
+# ============================================================================
+# Microsoft Entra Group-Based AKS Administration
+# ============================================================================
+
+variable "create_admin_group" {
+  description = "Feature flag: Create an Entra admin group via Terraform. Set to true to create a new group, false to use an existing group Object ID."
+  type        = bool
+  default     = false
+}
+
+variable "admin_group_name" {
+  description = "Name of the Entra admin group for AKS administrators"
+  type        = string
+  default     = "aks-admins"
+}
+
+variable "admin_group_description" {
+  description = "Description of the Entra admin group for AKS administrators"
+  type        = string
+  default     = "AKS administrators group — members get Azure Kubernetes Service Cluster Admin Role"
+}
+
 variable "aks_admin_group_object_ids" {
-  description = "Azure AD group object IDs for AKS admin access"
+  description = "Azure AD group object IDs for AKS admin access. If create_admin_group is true, this is auto-populated. Otherwise, provide existing group Object ID(s)."
   type        = list(string)
   default     = []
 }

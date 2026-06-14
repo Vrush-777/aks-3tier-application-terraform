@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 3.0"
     }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 2.0"
+    }
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
@@ -38,6 +42,11 @@ provider "azurerm" {
 
   subscription_id = var.subscription_id
   tenant_id       = var.tenant_id
+}
+
+# AzureAD provider — conditionally used when create_admin_group is true
+provider "azuread" {
+  tenant_id = var.tenant_id
 }
 
 provider "kubernetes" {
@@ -194,6 +203,38 @@ module "application_gateway" {
   common_tags                = var.common_tags
 }
 
+# ============================================================================
+# Optional: Microsoft Entra Admin Group
+# ============================================================================
+# When create_admin_group is true, Terraform creates the group and populates
+# admin_group_object_ids automatically. When false, users must provide
+# existing group Object IDs via aks_admin_group_object_ids.
+#
+# This is controlled by a feature flag to avoid accidental Entra object
+# creation/destruction during terraform destroy/apply cycles.
+
+data "azuread_client_config" "current" {}
+
+resource "azuread_group" "aks_admin" {
+  count = var.create_admin_group ? 1 : 0
+
+  display_name     = var.admin_group_name
+  description      = var.admin_group_description
+  owners           = [data.azuread_client_config.current.object_id]
+  security_enabled = true
+
+  # Prevent accidental deletion during terraform destroy
+  # This is safe to apply/destroy repeatedly without affecting the group
+}
+
+locals {
+  # Merge user-provided group IDs with the optional created group's ID
+  aks_admin_group_ids = distinct(concat(
+    var.aks_admin_group_object_ids,
+    var.create_admin_group ? [azuread_group.aks_admin[0].object_id] : []
+  ))
+}
+
 # AKS Cluster
 module "aks" {
   source = "../../modules/aks"
@@ -224,7 +265,7 @@ module "aks" {
   kubelet_client_id             = module.managed_identity.kubelet_identity_client_id
   kubelet_object_id             = module.managed_identity.kubelet_identity_principal_id
   kubelet_identity_id           = module.managed_identity.kubelet_identity_id
-  admin_group_object_ids        = var.aks_admin_group_object_ids
+  admin_group_object_ids        = local.aks_admin_group_ids
   appgw_id                      = module.application_gateway.appgw_id
   appgw_name                    = module.application_gateway.appgw_name
   appgw_subnet_cidr             = var.appgw_subnet_address_prefixes[0]

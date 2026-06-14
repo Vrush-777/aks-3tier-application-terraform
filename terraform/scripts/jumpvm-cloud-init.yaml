@@ -168,30 +168,156 @@ write_files:
       alias kgp='kubectl get pods'
       alias kdesc='kubectl describe'
       alias klogs='kubectl logs'
+
+      # Print a banner with login instructions on interactive shell
+      if [ -n "$PS1" ]; then
+        echo ""
+        echo "======================================================================"
+        echo "  Welcome to the AKS Jump VM"
+        echo ""
+        echo "  To connect to the AKS cluster, authenticate with your own identity:"
+        echo "    az login --use-device-code"
+        echo "    az account set --subscription <subscription-id>"
+        echo "    az aks get-credentials --resource-group <rg> --name <cluster>"
+        echo "    kubelogin convert-kubeconfig -l azurecli"
+        echo "    kubectl get nodes"
+        echo "======================================================================"
+        echo ""
+      fi
       EOF
 
-        cat > /opt/deploy/get-kubeconfig.sh <<'EOF'
+        cat > /opt/deploy/aks-admin-login.sh <<'LOGINEOF'
       #!/usr/bin/env bash
+      #=============================================================================
+      # aks-admin-login.sh — Authenticate as an AKS Administrator (user identity)
+      #
+      # This script uses YOUR Microsoft Entra identity to authenticate and retrieve
+      # AKS credentials. It does NOT use the Jump VM's managed identity for AKS.
+      #
+      # Prerequisites:
+      #   - Your Microsoft Entra user must be a member of the AKS admin group.
+      #   - Azure CLI, kubectl, and kubelogin are already installed.
+      #
+      # Usage:
+      #   ./aks-admin-login.sh <resource-group> <aks-cluster-name> [subscription-id]
+      #
+      # Example:
+      #   ./aks-admin-login.sh rg-aks-3tier-dev aks-ems-dev 6cdf4626-...-548d18
+      #=============================================================================
       set -Eeuo pipefail
 
-      RESOURCE_GROUP="${1:?Usage: get-kubeconfig.sh <resource-group> <aks-cluster-name> [subscription-id]}"
-      AKS_CLUSTER_NAME="${2:?Usage: get-kubeconfig.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      RESOURCE_GROUP="${1:?Usage: aks-admin-login.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      AKS_CLUSTER_NAME="${2:?Usage: aks-admin-login.sh <resource-group> <aks-cluster-name> [subscription-id]}"
       SUBSCRIPTION_ID="${3:-}"
 
-      az login --identity --allow-no-subscriptions >/dev/null
-      if [ -n "${SUBSCRIPTION_ID}" ]; then
-        az account set --subscription "${SUBSCRIPTION_ID}"
+      echo ""
+      echo "============================================================"
+      echo "  AKS Admin Login — User Identity Authentication"
+      echo "============================================================"
+      echo ""
+
+      # If not already logged in with a user identity, perform device-code login
+      if ! az account show 2>/dev/null | grep -q '"user"'; then
+        echo "Step 1/4: Authenticating with Microsoft Entra ID..."
+        echo "         A browser window will open for device code login."
+        echo ""
+        az login --use-device-code --allow-no-subscriptions
+        echo ""
+        echo "✅ Login successful."
+      else
+        echo "✅ Already authenticated to Azure."
       fi
 
+      # Optionally set subscription
+      if [ -n "${SUBSCRIPTION_ID}" ]; then
+        echo ""
+        echo "Step 2/4: Setting subscription to ${SUBSCRIPTION_ID}..."
+        az account set --subscription "${SUBSCRIPTION_ID}"
+        echo "✅ Subscription set."
+      fi
+
+      # Fetch AKS credentials (user-based authentication)
+      echo ""
+      echo "Step 3/4: Fetching AKS credentials for '${AKS_CLUSTER_NAME}'..."
       az aks get-credentials \
         --resource-group "${RESOURCE_GROUP}" \
         --name "${AKS_CLUSTER_NAME}" \
         --overwrite-existing
+      echo "✅ AKS kubeconfig merged."
 
-      kubelogin convert-kubeconfig -l msi
-      kubectl cluster-info
-      EOF
+      # Convert kubeconfig to use Azure CLI token
+      echo ""
+      echo "Step 4/4: Converting kubeconfig for Azure CLI authentication..."
+      kubelogin convert-kubeconfig -l azurecli
+      echo "✅ kubeconfig converted."
 
+      # Verify access
+      echo ""
+      echo "============================================================"
+      echo "  Verifying cluster access..."
+      echo "============================================================"
+      echo ""
+
+      kubectl cluster-info 2>/dev/null || echo ""
+
+      echo ""
+      echo "Testing node access with: kubectl get nodes"
+      if kubectl get nodes 2>/dev/null; then
+        echo ""
+        echo "✅ SUCCESS — You are authenticated as an AKS administrator."
+      else
+        echo ""
+        echo "⚠️  WARNING: Could not list nodes."
+        echo "   Possible reasons:"
+        echo "   - Your user is not a member of the AKS admin Entra group."
+        echo "   - The cluster is still provisioning."
+        echo "   - Network connectivity issue (private cluster)."
+        echo ""
+        echo "   Verify your group membership with:"
+        echo "     az ad signed-in-user show --query id -o tsv"
+      fi
+
+      echo ""
+      echo "============================================================"
+      echo "  Commands are now available:"
+      echo "    kubectl get nodes"
+      echo "    kubectl get pods -A"
+      echo "    kubectl get svc"
+      echo "    kubectl get ingress"
+      echo "============================================================"
+      LOGINEOF
+        chmod 0755 /opt/deploy/aks-admin-login.sh
+
+        # Keep the original get-kubeconfig.sh for backward compatibility,
+        # but now it warns about deprecation and delegates to the new script.
+        cat > /opt/deploy/get-kubeconfig.sh <<'LEGACYEOF'
+      #!/usr/bin/env bash
+      #=============================================================================
+      # [DEPRECATED] get-kubeconfig.sh
+      #
+      # This script is retained for backward compatibility. It now delegates to
+      # the new aks-admin-login.sh which uses user-identity authentication.
+      #
+      # AKS has been migrated from MSI-based admin access to Microsoft Entra
+      # group-based administration. Administrators should authenticate using
+      # their own Entra identity rather than the VM's managed identity.
+      #
+      # See: /opt/deploy/aks-admin-login.sh
+      #=============================================================================
+      echo ""
+      echo "⚠️  [DEPRECATED] get-kubeconfig.sh uses MSI-based authentication."
+      echo ""
+      echo "   AKS now uses Microsoft Entra group-based administration."
+      echo "   Please use the new login script instead:"
+      echo ""
+      echo "       /opt/deploy/aks-admin-login.sh <rg> <cluster> [subscription]"
+      echo ""
+      echo "   This will prompt for device-code login and use YOUR identity."
+      echo ""
+      echo "Redirecting to aks-admin-login.sh..."
+      echo ""
+      exec /opt/deploy/aks-admin-login.sh "$@"
+      LEGACYEOF
         chmod 0755 /opt/deploy/get-kubeconfig.sh
       }
 
