@@ -160,27 +160,6 @@ write_files:
       configure_jumpvm_profile() {
         log "Configuring Jump VM profile and helper scripts..."
         mkdir -p /opt/deploy/logs
-        mkdir -p /opt/charts
-        mkdir -p /opt/deploy/logs
-
-        echo "Cloning repository to copy Helm chart..."
-
-        git clone --depth 1 \
-        https://github.com/Vrush-777/aks-3tier-application-terraform.git \
-        /tmp/repo
-
-        if [ ! -d "/tmp/repo/helm/employee-management-system" ]; then
-        echo "ERROR: Helm chart not found in repository"
-        exit 1
-      fi
-
-        cp -r /tmp/repo/helm/employee-management-system /opt/charts/
-
-        chmod -R 755 /opt/charts/employee-management-system
-
-        rm -rf /tmp/repo
-
-        echo "Helm chart copied successfully to /opt/charts"
 
         cat > /etc/profile.d/aks-tools.sh <<'EOF'
       export PATH="/opt/deploy:/usr/local/bin:$PATH"
@@ -356,7 +335,7 @@ write_files:
       #
       # Prerequisites:
       #   - Script runs on Jump VM with system-assigned managed identity enabled
-      #   - Helm chart(s) are pre-deployed to /opt/charts/
+      #   - GitHub Actions passes a Helm chart archive path as argument 6
       #   - Azure CLI, kubectl, and Helm are installed on the Jump VM
       #
       # Arguments:
@@ -383,10 +362,12 @@ write_files:
       IMAGE_TAG="${3:?ERROR: Missing IMAGE_TAG argument}"
       ACR_SERVER="${4:?ERROR: Missing ACR_SERVER argument}"
       SUBSCRIPTION_ID="${5:?ERROR: Missing SUBSCRIPTION_ID argument}"
-      CHART_NAME="${6:?ERROR: Missing CHART_NAME argument}"
+      CHART_ARCHIVE="${6:?ERROR: Missing CHART_ARCHIVE argument}"
 
       LOG_DIR="/opt/deploy/logs"
       LOG_FILE="${LOG_DIR}/deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).log"
+      WORK_DIR="$(mktemp -d /tmp/ems-deploy.XXXXXX)"
+      CHART_DIR="${WORK_DIR}/deploy-pkg/employee-management-system"
 
       # =========================================================================
       # Logging Functions
@@ -407,7 +388,12 @@ write_files:
         fail "Deployment failed at line ${line_no} with exit code ${exit_code}"
       }
 
+      cleanup() {
+        rm -rf "${WORK_DIR}"
+      }
+
       trap 'on_error $LINENO' ERR
+      trap cleanup EXIT
 
       # =========================================================================
       # Main Deployment Logic
@@ -424,15 +410,21 @@ write_files:
       log "Image Tag:        ${IMAGE_TAG}"
       log "ACR Server:       ${ACR_SERVER}"
       log "Subscription ID:  ${SUBSCRIPTION_ID}"
-      log "Helm Chart:       /opt/charts/employee-management-system"
+      log "Chart Archive:    ${CHART_ARCHIVE}"
       log "Log File:         ${LOG_FILE}"
       log ""
 
-      if [ ! -d "/opt/charts/employee-management-system" ]; then
-          fail "Helm chart directory not found: /opt/charts/employee-management-system"
+      if [ ! -f "${CHART_ARCHIVE}" ]; then
+          fail "Helm chart archive not found: ${CHART_ARCHIVE}"
       fi
 
-      log "✅ Helm chart directory verified"
+      tar -xzf "${CHART_ARCHIVE}" -C "${WORK_DIR}"
+
+      if [ ! -d "${CHART_DIR}" ]; then
+          fail "Helm chart directory not found after extract: ${CHART_DIR}"
+      fi
+
+      log "Helm chart archive extracted successfully"
 
       # Step 1: Authenticate using system-assigned managed identity
       log "Step 1/4: Authenticating with system-assigned managed identity..."
@@ -458,18 +450,26 @@ write_files:
         --overwrite-existing >/dev/null 2>&1; then
         fail "Failed to get AKS credentials"
       fi
+      kubelogin convert-kubeconfig -l msi >/dev/null 2>&1
       log "✅ AKS credentials obtained"
       log ""
 
       # Step 4: Deploy Helm chart
+      log "Building Helm chart dependencies..."
+      helm dependency build "${CHART_DIR}" 2>&1 | tee -a "${LOG_FILE}"
+
       log "Step 4/4: Deploying Helm chart..."
       if ! helm upgrade --install employee-management \
-           /opt/charts/employee-management-system \
+           "${CHART_DIR}" \
            --namespace employee-management \
            --create-namespace \
-           --set backend.image.repository="${ACR_SERVER}/ems-backend" \
+           --wait \
+           --timeout 10m \
+           --set namespace="employee-management" \
+           --set registry.name="${ACR_SERVER}" \
+           --set backend.image.repository="ems-backend" \
            --set backend.image.tag="${IMAGE_TAG}" \
-           --set frontend.image.repository="${ACR_SERVER}/ems-frontend" \
+           --set frontend.image.repository="ems-frontend" \
            --set frontend.image.tag="${IMAGE_TAG}" \
            2>&1 | tee -a "${LOG_FILE}"; then
            fail "Helm deployment failed"
@@ -480,7 +480,7 @@ write_files:
       log "========================================="
       log "✅ DEPLOYMENT COMPLETED SUCCESSFULLY"
       log "========================================="
-      
+
       # FIX 1: Emit explicit deployment success marker
       # ONLY printed after helm upgrade --install succeeds
       # This is the final statement in deploy.sh
