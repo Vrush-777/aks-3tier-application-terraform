@@ -1,5 +1,33 @@
 name: Build, Push, and Deploy to Private AKS
 
+# =========================================================================
+# FIX 4: Deployment Trigger Strategy
+# =========================================================================
+# RISK: Multiple triggers (workflow_run + push) targeting the same paths
+# can cause DUPLICATE DEPLOYMENTS during rapid commits after Terraform runs.
+#
+# Current configuration:
+# - workflow_run: Triggered when "Terraform Infrastructure Pipeline" completes
+# - push: Triggered on commits to main with changes in ems-backend/, ems-fullstack/, helm/
+# - workflow_dispatch: Manual trigger
+#
+# RECOMMENDATION - Choose ONE approach:
+# 
+# OPTION A (Recommended):
+#   Use workflow_run + workflow_dispatch only
+#   - Prevents duplicate deployments after infrastructure changes
+#   - Requires manual trigger for non-infrastructure updates
+#   - Change: Comment out 'push' trigger below
+#
+# OPTION B:
+#   Use push + workflow_dispatch only
+#   - Deploys on every code change
+#   - Removes dependency on infrastructure pipeline completion
+#   - Change: Comment out 'workflow_run' trigger below
+#
+# Current Implementation: Both triggers enabled (potential duplicates possible)
+# =========================================================================
+
 on:
   workflow_run:
     workflows:
@@ -28,6 +56,8 @@ env:
   DEPLOYMENT_NAMESPACE: employee-management
   DOCKER_BUILDKIT: 1
   BUILDKIT_PROGRESS: plain
+  STORAGE_ACCOUNT_NAME: ${{ secrets.HELM_CHART_STORAGE_ACCOUNT }}
+  STORAGE_CONTAINER_NAME: ${{ secrets.HELM_CHART_STORAGE_CONTAINER }}
 
 jobs:
   # =========================================================================
@@ -45,7 +75,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Detect file changes
         id: changes
@@ -66,7 +96,7 @@ jobs:
     name: Build and Push Backend
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: always() || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: needs.detect-changes.outputs.backend-changed == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
       run:
         working-directory: ./ems-backend
@@ -78,7 +108,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Generate image tag
         id: image-tag
@@ -139,7 +169,7 @@ jobs:
     name: Build and Push Frontend
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: always() || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: needs.detect-changes.outputs.frontend-changed == 'true' || github.event_name == 'workflow_dispatch'
     defaults:
       run:
         working-directory: ./ems-fullstack
@@ -151,7 +181,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Generate image tag
         id: image-tag
@@ -203,14 +233,20 @@ jobs:
   deploy-to-aks:
     name: Deploy to Private AKS
     runs-on: ubuntu-latest
-    needs: [build-backend, build-frontend]
-    if: success()
+    needs:
+    - detect-changes
+    - build-backend
+    - build-frontend  
+    if: |
+      needs.build-backend.result == 'success' ||
+      needs.build-frontend.result == 'success' ||
+      needs.detect-changes.outputs.helm-changed == 'true'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Azure Login (Service Principal)
         uses: azure/login@v1
@@ -223,7 +259,17 @@ jobs:
           # Get Terraform outputs (requires terraform CLI)
           # For now, using static values from GitHub Secrets
           JUMP_VM_NAME="${{ secrets.JUMP_VM_NAME }}"
-          IMAGE_TAG="${{ needs.build-backend.outputs.backend-image-tag }}"
+          # Determine which image tag to use
+            if [ -n "${{ needs.build-backend.outputs.backend-image-tag }}" ]; then
+              IMAGE_TAG="${{ needs.build-backend.outputs.backend-image-tag }}"
+            elif [ -n "${{ needs.build-frontend.outputs.frontend-image-tag }}" ]; then
+              IMAGE_TAG="${{ needs.build-frontend.outputs.frontend-image-tag }}"
+            elif [ "${{ needs.detect-changes.outputs.helm-changed }}" = "true" ]; then
+              IMAGE_TAG="latest"
+            else
+              echo "ERROR: No image tag found"
+              exit 1
+            fi
           
           if [ -z "$JUMP_VM_NAME" ]; then
             echo "ERROR: JUMP_VM_NAME secret not set"
@@ -236,19 +282,252 @@ jobs:
           echo "aks_cluster=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
           echo "acr_server=${ACR_LOGIN_SERVER}" >> $GITHUB_OUTPUT
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
       - name: Prepare deployment artifacts
+        id: helm-package
         run: |
+          echo "📦 Packaging Helm chart..."
+          
+          # Package Helm chart
+          helm package ./helm/employee-management-system
+          
+          # Capture the generated .tgz filename
+          CHART_ARCHIVE=$(ls -1 employee-management-system-*.tgz | head -n 1)
+          if [ -z "${CHART_ARCHIVE}" ]; then
+            echo "ERROR: Helm chart packaging failed"
+            exit 1
+          fi
+          
+          # REQUIREMENT 4: Generate unique chart filename to prevent naming collisions
+          # Use GitHub Run ID + chart name for uniqueness across concurrent runs
+          UNIQUE_CHART="${GITHUB_RUN_ID}-${CHART_ARCHIVE}"
+          
+          echo "chart_archive=${CHART_ARCHIVE}" >> $GITHUB_OUTPUT
+          echo "unique_chart=${UNIQUE_CHART}" >> $GITHUB_OUTPUT
+          echo "✅ Helm chart packaged: ${CHART_ARCHIVE}"
+          echo "✅ Unique filename for storage: ${UNIQUE_CHART}"
 
-            echo "📦 Preparing deployment artifacts..."
+      # ========================================================================
+      # REQUIREMENT 2: Upload Helm chart to Azure Storage and generate SAS URL
+      # REQUIREMENT 4: Use unique chart filename to prevent collisions
+      # ========================================================================
+      - name: Transfer Helm Chart to Jump VM (via Azure Storage)
+        id: chart-transfer
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -e
+            
+            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
+            CHART_ARCHIVE="${{ steps.helm-package.outputs.chart_archive }}"
+            UNIQUE_CHART="${{ steps.helm-package.outputs.unique_chart }}"
+            STORAGE_ACCOUNT="${{ env.STORAGE_ACCOUNT_NAME }}"
+            STORAGE_CONTAINER="${{ env.STORAGE_CONTAINER_NAME }}"
+            
+            if [ -z "${STORAGE_ACCOUNT}" ] || [ -z "${STORAGE_CONTAINER}" ]; then
+              echo "ERROR: STORAGE_ACCOUNT_NAME or STORAGE_CONTAINER_NAME not configured"
+              echo "       Add secrets: HELM_CHART_STORAGE_ACCOUNT and HELM_CHART_STORAGE_CONTAINER"
+              exit 1
+            fi
+            
+            echo "📤 Transferring Helm chart to Jump VM via Azure Storage..."
+            echo "  Chart Archive (local): ${CHART_ARCHIVE}"
+            echo "  Chart Archive (storage): ${UNIQUE_CHART}"
+            echo "  Storage Account: ${STORAGE_ACCOUNT}"
+            echo "  Container: ${STORAGE_CONTAINER}"
+            
+            # Verify chart file exists before upload
+            if [ ! -f "${CHART_ARCHIVE}" ]; then
+              echo "ERROR: Helm chart file not found: ${CHART_ARCHIVE}"
+              exit 1
+            fi
+            
+            # Step 1: Upload Helm chart archive to Azure Storage using unique name
+            # REQUIREMENT 1: Use Azure AD authentication (--auth-mode login)
+            echo ""
+            echo "Step 1/3: Uploading Helm chart to Azure Storage..."
+            az storage blob upload \
+              --account-name "${STORAGE_ACCOUNT}" \
+              --container-name "${STORAGE_CONTAINER}" \
+              --file "${CHART_ARCHIVE}" \
+              --name "${UNIQUE_CHART}" \
+              --overwrite \
+              --auth-mode login
+            echo "✅ Chart uploaded to storage: ${UNIQUE_CHART}"
+            
+            # Step 2: Generate SAS URL valid for 2 hours using unique filename
+            # REQUIREMENT 1: Use Azure AD authentication (--auth-mode login)
+            echo ""
+            echo "Step 2/3: Generating temporary SAS URL (2-hour expiry)..."
+            SAS_URL=$(az storage blob generate-sas \
+              --account-name "${STORAGE_ACCOUNT}" \
+              --container-name "${STORAGE_CONTAINER}" \
+              --name "${UNIQUE_CHART}" \
+              --permissions r \
+              --expiry $(date -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ') \
+              --full-uri \
+              --auth-mode login \
+              --output tsv)
+            
+            if [ -z "${SAS_URL}" ]; then
+              echo "ERROR: Failed to generate SAS URL"
+              exit 1
+            fi
+            echo "✅ SAS URL generated (2-hour expiry)"
+            
+            # Step 3: Download Helm chart on Jump VM using unique filename
+            # REQUIREMENT 3: Add Helm chart integrity validation
+            # REQUIREMENT 4: Use unique chart name for download
+            echo ""
+            echo "Step 3/3: Downloading and validating Helm chart on Jump VM..."
+            
+            DOWNLOAD_SCRIPT="
+            mkdir -p /opt/charts
+            curl -L \"${SAS_URL}\" -o \"/opt/charts/${UNIQUE_CHART}\" --max-time 300
+            if [ ! -f \"/opt/charts/${UNIQUE_CHART}\" ]; then
+              echo \"❌ Failed to download Helm chart\"
+              exit 1
+            fi
+            
+            # Verify chart file size is reasonable (minimum 1KB for valid chart)
+            CHART_SIZE=\$(stat -f%z \"/opt/charts/${UNIQUE_CHART}\" 2>/dev/null || stat -c%s \"/opt/charts/${UNIQUE_CHART}\" 2>/dev/null || echo 0)
+            if [ \"\${CHART_SIZE}\" -lt 1024 ]; then
+              echo \"❌ ERROR: Downloaded Helm chart is too small (\${CHART_SIZE} bytes). File may be corrupted.\"
+              exit 1
+            fi
+            
+            ls -lh \"/opt/charts/${UNIQUE_CHART}\"
+            echo \"✅ Helm chart downloaded successfully\"
+            "
+            
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${DOWNLOAD_SCRIPT}"
+            
+            echo ""
+            echo "✅ Helm chart successfully transferred to Jump VM: /opt/charts/${UNIQUE_CHART}"
 
-            mkdir -p deploy-pkg
-            cp -r ./helm/employee-management-system deploy-pkg/
-            tar -czf deploy-artifacts.tar.gz deploy-pkg/
+      # ========================================================================
+      # REQUIREMENT 4: Validate deploy.sh existence before deployment
+      # ========================================================================
+      - name: Validate deploy.sh exists on Jump VM
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -e
+            
+            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
+            
+            echo "🔍 Validating deploy.sh exists on Jump VM..."
+            
+            VALIDATION_SCRIPT="
+            if [ ! -f /opt/deploy/deploy.sh ]; then
+              echo \"❌ ERROR: /opt/deploy/deploy.sh not found on Jump VM\"
+              echo \"   This script is created during Jump VM bootstrap via cloud-init.\"
+              echo \"   Possible causes:\"
+              echo \"   1. Jump VM bootstrap incomplete - wait a few minutes\"
+              echo \"   2. Cloud-init failed - check Jump VM logs: cat /var/log/cloud-init-output.log\"
+              echo \"   3. Script was accidentally deleted\"
+              exit 1
+            fi
+            
+            echo \"Validating deploy.sh properties...\"
+            ls -l /opt/deploy/deploy.sh
+            
+            # Check if executable
+            if [ ! -x /opt/deploy/deploy.sh ]; then
+              echo \"⚠️  WARNING: /opt/deploy/deploy.sh is not executable\"
+              chmod 755 /opt/deploy/deploy.sh
+              echo \"✅ Fixed permissions: chmod 755 /opt/deploy/deploy.sh\"
+            fi
+            
+            echo \"✅ /opt/deploy/deploy.sh validation passed\"
+            "
+            
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${VALIDATION_SCRIPT}"
 
+      # ========================================================================
+      # Validate Helm chart integrity before deployment
+      # REQUIREMENT 3: Validate Helm chart integrity after download
+      # REQUIREMENT 3: Verify Helm is available on Jump VM
+      # REQUIREMENT 4: Use unique chart filename
+      # ========================================================================
+      - name: Validate Helm Chart Integrity
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -e
+            
+            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
+            UNIQUE_CHART="${{ steps.helm-package.outputs.unique_chart }}"
+            
+            echo "🔍 Validating Helm chart integrity on Jump VM..."
+            
+            # REQUIREMENT 3: First check if Helm is available on Jump VM
+            HELM_CHECK_SCRIPT="
+            echo \"Checking Helm version...\"
+            if ! helm version >/dev/null 2>&1; then
+              echo \"❌ ERROR: Helm is not installed on Jump VM\"
+              echo \"   Helm must be installed during Jump VM bootstrap via cloud-init.\"
+              echo \"   Possible causes:\"
+              echo \"   1. Jump VM bootstrap incomplete - wait a few minutes\"
+              echo \"   2. Cloud-init failed - check: cat /var/log/cloud-init-output.log\"
+              echo \"   3. Helm installation failed during bootstrap\"
+              exit 1
+            fi
+            helm version
+            "
+            
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${HELM_CHECK_SCRIPT}"
+            
+            # REQUIREMENT 4: Validate chart using unique filename
+            VALIDATION_SCRIPT="
+            if [ ! -f \"/opt/charts/${UNIQUE_CHART}\" ]; then
+              echo \"❌ ERROR: Helm chart not found at /opt/charts/${UNIQUE_CHART}\"
+              exit 1
+            fi
+            
+            echo \"Extracting and validating Helm chart metadata...\"
+            if ! helm show chart \"/opt/charts/${UNIQUE_CHART}\" >/dev/null 2>&1; then
+              echo \"❌ ERROR: Failed to validate Helm chart\"
+              echo \"   The chart archive may be corrupted.\"
+              exit 1
+            fi
+            
+            echo \"✅ Helm chart integrity validated\"
+            helm show chart \"/opt/charts/${UNIQUE_CHART}\"
+            "
+            
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${VALIDATION_SCRIPT}"
 
-            echo "Helm chart prepared for deployment"
-
+      # ========================================================================
+      # FIX 1: Improved deployment success detection
+      # Requires: deploy.sh prints "DEPLOYMENT_STATUS=SUCCESS" on successful completion
+      # See: terraform/scripts/jumpvm-cloud-init.yaml - add after helm upgrade --install
+      # ========================================================================
       - name: Deploy via Jump VM - Run Command
+        id: deploy
         uses: azure/CLI@v1
         with:
           inlineScript: |
@@ -259,6 +538,7 @@ jobs:
             RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
             AKS_CLUSTER="${{ steps.terraform.outputs.aks_cluster }}"
             ACR_SERVER="${{ steps.terraform.outputs.acr_server }}"
+            UNIQUE_CHART="${{ steps.helm-package.outputs.unique_chart }}"
             
             echo "🚀 Starting deployment to private AKS cluster..."
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -267,44 +547,176 @@ jobs:
             echo "AKS Cluster: ${AKS_CLUSTER}"
             echo "Image Tag: ${IMAGE_TAG}"
             echo "ACR Server: ${ACR_SERVER}"
+            echo "Helm Chart: ${UNIQUE_CHART}"
+            echo "Chart Location: /opt/charts/${UNIQUE_CHART}"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Construct the deployment command
-            DEPLOY_COMMAND="/opt/deploy/deploy.sh ${RESOURCE_GROUP} ${AKS_CLUSTER} ${IMAGE_TAG} ${ACR_SERVER} ${{ env.AZURE_SUBSCRIPTION_ID }}"
+            # Construct the deployment command with unique Helm chart parameter
+            # (Preserve deploy.sh execution model)
+            # Uses Jump VM's system-assigned managed identity for authentication
+            DEPLOY_COMMAND="/opt/deploy/deploy.sh ${RESOURCE_GROUP} ${AKS_CLUSTER} ${IMAGE_TAG} ${ACR_SERVER} ${{ env.AZURE_SUBSCRIPTION_ID }} ${UNIQUE_CHART}"
             
             echo "📡 Invoking deployment script on Jump VM..."
             
-            # Use Azure VM Run Command to execute deployment script
-            # This command runs with the Jump VM's system-assigned managed identity
-            az vm run-command invoke \
+            # FIX 1: Capture deployment output using Azure CLI --query (no jq dependency)
+            DEPLOY_MESSAGE=$(az vm run-command invoke \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
               --scripts "${DEPLOY_COMMAND}" \
-              --query 'value[0].message' \
-              --output tsv || {
-                echo "❌ Deployment command failed"
-                exit 1
-              }
+              --query "value[0].message" \
+              --output tsv)
+            
+            echo ""
+            echo "📋 Deployment Output:"
+            echo "${DEPLOY_MESSAGE}"
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # FIX 1: Check for deployment success marker
+            # deploy.sh MUST print "DEPLOYMENT_STATUS=SUCCESS" on successful completion
+            if ! echo "${DEPLOY_MESSAGE}" | grep -q "DEPLOYMENT_STATUS=SUCCESS"; then
+              echo "❌ Deployment failed on Jump VM"
+              echo ""
+              echo "Deployment output did not contain success marker: DEPLOYMENT_STATUS=SUCCESS"
+              echo ""
+              echo "Full deployment output:"
+              echo "${DEPLOY_MESSAGE}"
+              exit 1
+            fi
             
             echo "✅ Deployment script executed successfully"
+            echo ""
+            echo "Last 20 lines of deployment output:"
+            echo "${DEPLOY_MESSAGE}" | tail -20
 
+      # ========================================================================
+      # FIX 2: Always clean up temporary artifacts (success or failure)
+      # ========================================================================
+      - name: Clean up Helm Chart from Azure Storage
+        if: always()
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -e
+            
+            UNIQUE_CHART="${{ steps.helm-package.outputs.unique_chart }}"
+            STORAGE_ACCOUNT="${{ env.STORAGE_ACCOUNT_NAME }}"
+            STORAGE_CONTAINER="${{ env.STORAGE_CONTAINER_NAME }}"
+            
+            echo "🗑️  Cleaning up Helm chart from Azure Storage..."
+            echo "   Chart: ${UNIQUE_CHART}"
+            
+            # Delete unique Helm chart from Azure Storage using Azure AD authentication
+            az storage blob delete \
+              --account-name "${STORAGE_ACCOUNT}" \
+              --container-name "${STORAGE_CONTAINER}" \
+              --name "${UNIQUE_CHART}" \
+              --auth-mode login
+            
+            echo "✅ Helm chart removed from storage: ${UNIQUE_CHART}"
+
+      - name: Clean up Helm Chart from Jump VM
+        if: always()
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -e
+            
+            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
+            UNIQUE_CHART="${{ steps.helm-package.outputs.unique_chart }}"
+            
+            echo "🗑️  Cleaning up Helm chart from Jump VM..."
+            echo "   Chart: ${UNIQUE_CHART}"
+            
+            CLEANUP_SCRIPT="
+            if [ -f \"/opt/charts/${UNIQUE_CHART}\" ]; then
+              rm -f \"/opt/charts/${UNIQUE_CHART}\"
+              echo \"✅ Helm chart removed: /opt/charts/${UNIQUE_CHART}\"
+            else
+              echo \"⚠️  Helm chart not found at /opt/charts/${UNIQUE_CHART}\"
+            fi
+            
+            # Show remaining charts (for auditing)
+            echo \"Remaining artifacts in /opt/charts/:\"
+            ls -lh /opt/charts/ || echo \"(directory empty)\"
+            "
+            
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "${CLEANUP_SCRIPT}"
+
+      # ========================================================================
+      # FIX 2: Correct Verify Deployment Status implementation
+      # VERIFICATION_SCRIPT contains ONLY commands that execute ON THE JUMP VM
+      # Azure CLI commands are executed OUTSIDE the script definition
+      # ========================================================================
       - name: Verify Deployment Status
         uses: azure/CLI@v1
         with:
           inlineScript: |
+            set -e
+            
             JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
             RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
             
-            echo "📊 Verifying deployment status..."
+            echo "📊 Verifying deployment status on private AKS cluster..."
+            echo ""
             
-            # Check Jump VM status
-            az vm get-instance-view \
+            # FIX 2: Define VERIFICATION_SCRIPT with ONLY Jump VM commands
+            # This script executes entirely on the Jump VM using its kubeconfig
+            # No Azure CLI commands are embedded in this script
+            VERIFICATION_SCRIPT="
+            set -Eeuo pipefail
+            
+            echo 'Checking Kubernetes pod status in employee-management namespace...'
+            echo ''
+            
+            # FIX 3: Simplified pod status check (no JSON parsing)
+            echo 'Current pod status:'
+            kubectl get pods -n employee-management
+            echo ''
+            
+            # FIX 3: Fail if unhealthy pods detected
+            if kubectl get pods -n employee-management | grep -E 'CrashLoopBackOff|Error|Failed'; then
+              echo '❌ ERROR: Unhealthy pods detected'
+              exit 1
+            fi
+            
+            echo ''
+            echo 'Checking Helm release status...'
+            echo ''
+            
+            # FIX 4: Use helm status command (not JSON parsing)
+            HELM_STATUS=\$(helm status employee-management -n employee-management)
+            
+            echo \"\${HELM_STATUS}\"
+            echo ''
+            
+            # FIX 4: Validate Helm release status is deployed
+            if ! echo \"\${HELM_STATUS}\" | grep -q '^STATUS: deployed'; then
+              echo '❌ ERROR: Helm release is not deployed'
+              exit 1
+            fi
+            
+            echo '✅ Helm release status is deployed'
+            echo ''
+            echo '✅ All deployment verifications passed'
+            "
+            
+            # FIX 2: Execute VERIFICATION_SCRIPT on Jump VM
+            # Azure CLI command is executed OUTSIDE the script definition
+            az vm run-command invoke \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
-              --query 'instanceView.statuses[1].displayStatus' \
-              --output tsv
+              --command-id RunShellScript \
+              --scripts "${VERIFICATION_SCRIPT}"
             
+            echo ""
             echo "✅ Deployment verification complete"
 
       - name: Deployment Summary

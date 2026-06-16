@@ -160,6 +160,7 @@ write_files:
       configure_jumpvm_profile() {
         log "Configuring Jump VM profile and helper scripts..."
         mkdir -p /opt/deploy/logs
+        mkdir -p /opt/charts
 
         cat > /etc/profile.d/aks-tools.sh <<'EOF'
       export PATH="/opt/deploy:/usr/local/bin:$PATH"
@@ -319,6 +320,156 @@ write_files:
       exec /opt/deploy/aks-admin-login.sh "$@"
       LEGACYEOF
         chmod 0755 /opt/deploy/get-kubeconfig.sh
+
+        # Create deploy.sh — Application deployment script for Helm-based deployments
+        # This script authenticates using the Jump VM's system-assigned managed identity,
+        # retrieves AKS credentials, and deploys applications via Helm.
+        cat > /opt/deploy/deploy.sh <<'DEPLOYEOF'
+      #!/usr/bin/env bash
+      #=============================================================================
+      # deploy.sh — Deploy applications to private AKS using Helm
+      #
+      # This script is designed to be executed on the Jump VM using Azure VM
+      # Run Command from GitHub Actions. It uses the Jump VM's system-assigned
+      # managed identity for authentication and deploys Helm charts to the AKS
+      # cluster.
+      #
+      # Prerequisites:
+      #   - Script runs on Jump VM with system-assigned managed identity enabled
+      #   - Helm chart(s) are pre-deployed to /opt/charts/
+      #   - Azure CLI, kubectl, and Helm are installed on the Jump VM
+      #
+      # Arguments:
+      #   $1 = RESOURCE_GROUP       Azure resource group name
+      #   $2 = AKS_CLUSTER          AKS cluster name
+      #   $3 = IMAGE_TAG            Container image tag (e.g., git commit SHA)
+      #   $4 = ACR_SERVER           Azure Container Registry server (e.g., myacr.azurecr.io)
+      #   $5 = SUBSCRIPTION_ID      Azure subscription ID
+      #   $6 = CHART_NAME           Helm chart name (must exist in /opt/charts/)
+      #
+      # Example:
+      #   ./deploy.sh rg-aks-3tier-dev aks-ems-dev abc1234 myacr.azurecr.io \n      #     6cdf4626-...-548d18 employee-management-system-1.0.0.tgz
+      #
+      # Exit codes:
+      #   0 = Success
+      #   1 = Error (any command fails)
+      #=============================================================================
+      set -Eeuo pipefail
+
+      # =========================================================================
+      # Argument Validation
+      # =========================================================================
+      RESOURCE_GROUP="${1:?ERROR: Missing RESOURCE_GROUP argument}"
+      AKS_CLUSTER="${2:?ERROR: Missing AKS_CLUSTER argument}"
+      IMAGE_TAG="${3:?ERROR: Missing IMAGE_TAG argument}"
+      ACR_SERVER="${4:?ERROR: Missing ACR_SERVER argument}"
+      SUBSCRIPTION_ID="${5:?ERROR: Missing SUBSCRIPTION_ID argument}"
+      CHART_NAME="${6:?ERROR: Missing CHART_NAME argument}"
+
+      CHART_PATH="/opt/charts/${CHART_NAME}"
+      LOG_DIR="/opt/deploy/logs"
+      LOG_FILE="${LOG_DIR}/deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).log"
+
+      # =========================================================================
+      # Logging Functions
+      # =========================================================================
+      log() {
+        local msg="[$(date --iso-8601=seconds)] $*"
+        echo "${msg}" | tee -a "${LOG_FILE}"
+      }
+
+      fail() {
+        log "ERROR: $*"
+        exit 1
+      }
+
+      on_error() {
+        local exit_code=$?
+        local line_no=$1
+        fail "Deployment failed at line ${line_no} with exit code ${exit_code}"
+      }
+
+      trap 'on_error $LINENO' ERR
+
+      # =========================================================================
+      # Main Deployment Logic
+      # =========================================================================
+
+      # Ensure log directory exists
+      mkdir -p "${LOG_DIR}"
+
+      log "========================================="
+      log "Starting AKS Deployment"
+      log "========================================="
+      log "Resource Group:   ${RESOURCE_GROUP}"
+      log "AKS Cluster:      ${AKS_CLUSTER}"
+      log "Image Tag:        ${IMAGE_TAG}"
+      log "ACR Server:       ${ACR_SERVER}"
+      log "Subscription ID:  ${SUBSCRIPTION_ID}"
+      log "Helm Chart:       ${CHART_NAME}"
+      log "Log File:         ${LOG_FILE}"
+      log ""
+
+      # Verify chart exists
+      if [ ! -f "${CHART_PATH}" ]; then
+        fail "Helm chart not found at ${CHART_PATH}"
+      fi
+      log "✅ Helm chart verified: ${CHART_PATH}"
+      log ""
+
+      # Step 1: Authenticate using system-assigned managed identity
+      log "Step 1/4: Authenticating with system-assigned managed identity..."
+      if ! az login --identity >/dev/null 2>&1; then
+        fail "Failed to authenticate with managed identity"
+      fi
+      log "✅ Authenticated successfully"
+      log ""
+
+      # Step 2: Set subscription
+      log "Step 2/4: Setting subscription to ${SUBSCRIPTION_ID}..."
+      if ! az account set --subscription "${SUBSCRIPTION_ID}" >/dev/null 2>&1; then
+        fail "Failed to set subscription"
+      fi
+      log "✅ Subscription set"
+      log ""
+
+      # Step 3: Get AKS credentials
+      log "Step 3/4: Obtaining AKS credentials..."
+      if ! az aks get-credentials \
+        --resource-group "${RESOURCE_GROUP}" \
+        --name "${AKS_CLUSTER}" \
+        --overwrite-existing >/dev/null 2>&1; then
+        fail "Failed to get AKS credentials"
+      fi
+      log "✅ AKS credentials obtained"
+      log ""
+
+      # Step 4: Deploy Helm chart
+      log "Step 4/4: Deploying Helm chart..."
+      if ! helm upgrade --install employee-management \
+        "${CHART_PATH}" \
+        --namespace employee-management \
+        --create-namespace \
+        --set backend.image.repository="${ACR_SERVER}/ems-backend" \
+        --set backend.image.tag="${IMAGE_TAG}" \
+        --set frontend.image.repository="${ACR_SERVER}/ems-frontend" \
+        --set frontend.image.tag="${IMAGE_TAG}" \
+        2>&1 | tee -a "${LOG_FILE}"; then
+        fail "Helm deployment failed"
+      fi
+      log "✅ Helm chart deployed successfully"
+      log ""
+
+      log "========================================="
+      log "✅ DEPLOYMENT COMPLETED SUCCESSFULLY"
+      log "========================================="
+      
+      # FIX 1: Emit explicit deployment success marker
+      # ONLY printed after helm upgrade --install succeeds
+      # This is the final statement in deploy.sh
+      echo "DEPLOYMENT_STATUS=SUCCESS"
+      DEPLOYEOF
+        chmod 0755 /opt/deploy/deploy.sh
       }
 
       validate_installation() {
@@ -336,7 +487,9 @@ write_files:
         helm version
         kubelogin --version
         jq --version
+        set +o pipefail
         unzip -v | head -n 2
+        set -o pipefail
         git --version
       }
 
