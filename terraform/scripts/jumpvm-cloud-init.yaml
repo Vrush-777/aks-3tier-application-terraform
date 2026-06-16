@@ -161,6 +161,26 @@ write_files:
         log "Configuring Jump VM profile and helper scripts..."
         mkdir -p /opt/deploy/logs
         mkdir -p /opt/charts
+        mkdir -p /opt/deploy/logs
+
+        echo "Cloning repository to copy Helm chart..."
+
+        git clone --depth 1 \
+        https://github.com/Vrush-777/aks-3tier-application-terraform.git \
+        /tmp/repo
+
+        if [ ! -d "/tmp/repo/helm/employee-management-system" ]; then
+        echo "ERROR: Helm chart not found in repository"
+        exit 1
+      fi
+
+        cp -r /tmp/repo/helm/employee-management-system /opt/charts/
+
+        chmod -R 755 /opt/charts/employee-management-system
+
+        rm -rf /tmp/repo
+
+        echo "Helm chart copied successfully to /opt/charts"
 
         cat > /etc/profile.d/aks-tools.sh <<'EOF'
       export PATH="/opt/deploy:/usr/local/bin:$PATH"
@@ -345,10 +365,9 @@ write_files:
       #   $3 = IMAGE_TAG            Container image tag (e.g., git commit SHA)
       #   $4 = ACR_SERVER           Azure Container Registry server (e.g., myacr.azurecr.io)
       #   $5 = SUBSCRIPTION_ID      Azure subscription ID
-      #   $6 = CHART_NAME           Helm chart name (must exist in /opt/charts/)
       #
       # Example:
-      #   ./deploy.sh rg-aks-3tier-dev aks-ems-dev abc1234 myacr.azurecr.io \n      #     6cdf4626-...-548d18 employee-management-system-1.0.0.tgz
+      #   ./deploy.sh rg-aks-3tier-dev aks-ems-dev abc1234 myacr.azurecr.io \n      #     6cdf4626-...-548d18
       #
       # Exit codes:
       #   0 = Success
@@ -366,7 +385,6 @@ write_files:
       SUBSCRIPTION_ID="${5:?ERROR: Missing SUBSCRIPTION_ID argument}"
       CHART_NAME="${6:?ERROR: Missing CHART_NAME argument}"
 
-      CHART_PATH="/opt/charts/${CHART_NAME}"
       LOG_DIR="/opt/deploy/logs"
       LOG_FILE="${LOG_DIR}/deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).log"
 
@@ -406,16 +424,15 @@ write_files:
       log "Image Tag:        ${IMAGE_TAG}"
       log "ACR Server:       ${ACR_SERVER}"
       log "Subscription ID:  ${SUBSCRIPTION_ID}"
-      log "Helm Chart:       ${CHART_NAME}"
+      log "Helm Chart:       /opt/charts/employee-management-system"
       log "Log File:         ${LOG_FILE}"
       log ""
 
-      # Verify chart exists
-      if [ ! -f "${CHART_PATH}" ]; then
-        fail "Helm chart not found at ${CHART_PATH}"
+      if [ ! -d "/opt/charts/employee-management-system" ]; then
+          fail "Helm chart directory not found: /opt/charts/employee-management-system"
       fi
-      log "✅ Helm chart verified: ${CHART_PATH}"
-      log ""
+
+      log "✅ Helm chart directory verified"
 
       # Step 1: Authenticate using system-assigned managed identity
       log "Step 1/4: Authenticating with system-assigned managed identity..."
@@ -447,15 +464,15 @@ write_files:
       # Step 4: Deploy Helm chart
       log "Step 4/4: Deploying Helm chart..."
       if ! helm upgrade --install employee-management \
-        "${CHART_PATH}" \
-        --namespace employee-management \
-        --create-namespace \
-        --set backend.image.repository="${ACR_SERVER}/ems-backend" \
-        --set backend.image.tag="${IMAGE_TAG}" \
-        --set frontend.image.repository="${ACR_SERVER}/ems-frontend" \
-        --set frontend.image.tag="${IMAGE_TAG}" \
-        2>&1 | tee -a "${LOG_FILE}"; then
-        fail "Helm deployment failed"
+           /opt/charts/employee-management-system \
+           --namespace employee-management \
+           --create-namespace \
+           --set backend.image.repository="${ACR_SERVER}/ems-backend" \
+           --set backend.image.tag="${IMAGE_TAG}" \
+           --set frontend.image.repository="${ACR_SERVER}/ems-frontend" \
+           --set frontend.image.tag="${IMAGE_TAG}" \
+           2>&1 | tee -a "${LOG_FILE}"; then
+           fail "Helm deployment failed"
       fi
       log "✅ Helm chart deployed successfully"
       log ""
