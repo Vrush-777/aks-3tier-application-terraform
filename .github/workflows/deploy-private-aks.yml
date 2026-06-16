@@ -43,6 +43,7 @@ on:
       - 'ems-fullstack/**'
       - 'helm/**'
 
+
   workflow_dispatch:
 
 env:
@@ -382,7 +383,7 @@ jobs:
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
-              --scripts @invoke-deploy.sh \
+              --scripts "$(cat invoke-deploy.sh)" \
             --query 'value[0].message' \
             --output tsv 2>&1)
             DEPLOY_EXIT_CODE=$?
@@ -540,4 +541,3 @@ jobs:
           # Example: test API endpoints, verify pods are running, etc.
 
           echo "✅ Smoke tests completed"
- 
