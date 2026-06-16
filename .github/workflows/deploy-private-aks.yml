@@ -37,7 +37,7 @@ on:
 
   push:
     branches:
-      - main
+      - test
     paths:
       - 'ems-backend/**'
       - 'ems-fullstack/**'

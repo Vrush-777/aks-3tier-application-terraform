@@ -3,14 +3,14 @@ name: Terraform Infrastructure Pipeline
 on:
   push:
     branches:
-      - main
+      - test
 
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform.yml'
   pull_request:
     branches:
-      - main
+      - test
 
     paths:
       - 'terraform/**'
