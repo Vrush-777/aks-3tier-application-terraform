@@ -286,41 +286,43 @@ jobs:
         with:
           inlineScript: |
             set -e
-            
+      
             JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
             RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
-            
+      
             echo "🔍 Validating deploy.sh exists on Jump VM..."
-            
-            VALIDATION_SCRIPT="
-            if [ ! -f /opt/deploy/deploy.sh ]; then
-              echo \"❌ ERROR: /opt/deploy/deploy.sh not found on Jump VM\"
-              echo \"   This script is created during Jump VM bootstrap via cloud-init.\"
-              echo \"   Possible causes:\"
-              echo \"   1. Jump VM bootstrap incomplete - wait a few minutes\"
-              echo \"   2. Cloud-init failed - check Jump VM logs: cat /var/log/cloud-init-output.log\"
-              echo \"   3. Script was accidentally deleted\"
-              exit 1
-            fi
-            
-            echo \"Validating deploy.sh properties...\"
-            ls -l /opt/deploy/deploy.sh
-            
-            # Check if executable
-            if [ ! -x /opt/deploy/deploy.sh ]; then
-              echo \"⚠️  WARNING: /opt/deploy/deploy.sh is not executable\"
-              chmod 755 /opt/deploy/deploy.sh
-              echo \"✅ Fixed permissions: chmod 755 /opt/deploy/deploy.sh\"
-            fi
-            
-            echo \"✅ /opt/deploy/deploy.sh validation passed\"
-            "
-            
+
             az vm run-command invoke \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
-              --scripts "${VALIDATION_SCRIPT}"
+              --scripts "
+              timeout=600
+
+              while [ \$timeout -gt 0 ]; do
+                if [ -f /opt/deploy/deploy.sh ]; then
+                  echo '✅ deploy.sh found'
+                  ls -l /opt/deploy/deploy.sh
+
+                  if [ ! -x /opt/deploy/deploy.sh ]; then
+                    echo '⚠️ deploy.sh is not executable'
+                    chmod 755 /opt/deploy/deploy.sh
+                    echo '✅ Permissions fixed'
+                  fi
+
+                  exit 0
+                  fi
+
+                  echo '⏳ Waiting for cloud-init to complete...'
+                  sleep 30
+                  timeout=\$((timeout-30))
+                done
+
+                echo '❌ Timeout waiting for deploy.sh'
+                exit 1
+              " \
+              --query 'value[0].message' \
+              --output tsv
 
       # ========================================================================
       # FIX 1: Improved deployment success detection
@@ -352,19 +354,20 @@ jobs:
             # Construct the deployment command with unique Helm chart parameter
             # (Preserve deploy.sh execution model)
             # Uses Jump VM's system-assigned managed identity for authentication
-            DEPLOY_COMMAND="/opt/deploy/deploy.sh ${RESOURCE_GROUP} ${AKS_CLUSTER} ${IMAGE_TAG} ${ACR_SERVER} ${{ env.AZURE_SUBSCRIPTION_ID }}"
-            
-            echo "📡 Invoking deployment script on Jump VM..."
-            
-            # FIX 1: Capture deployment output using Azure CLI --query (no jq dependency)
             DEPLOY_MESSAGE=$(az vm run-command invoke \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
-              --scripts "${DEPLOY_COMMAND}" \
-              --query "value[0].message" \
-              --output tsv)
-            
+              --scripts "
+                /opt/deploy/deploy.sh \
+                '${RESOURCE_GROUP}' \
+                '${AKS_CLUSTER}' \
+                '${IMAGE_TAG}' \
+                '${ACR_SERVER}' \
+                '${{ env.AZURE_SUBSCRIPTION_ID }}'
+            " \
+            --query 'value[0].message' \
+            --output tsv)
             echo ""
             echo "📋 Deployment Output:"
             echo "${DEPLOY_MESSAGE}"
