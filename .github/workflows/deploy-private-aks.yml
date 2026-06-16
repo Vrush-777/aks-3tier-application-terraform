@@ -373,25 +373,29 @@ jobs:
             base64 -d "${REMOTE_CHART_ARCHIVE}.b64" > "${REMOTE_CHART_ARCHIVE}"
             rm -f "${REMOTE_CHART_ARCHIVE}.b64"
 
-            /opt/deploy/deploy.sh \
-              "${RESOURCE_GROUP}" \
-              "${AKS_CLUSTER}" \
-              "${IMAGE_TAG}" \
-              "${ACR_SERVER}" \
-              "${{ env.AZURE_SUBSCRIPTION_ID }}" \
-              "${REMOTE_CHART_ARCHIVE}"
+            echo "Invoking deploy.sh with chart archive: ${REMOTE_CHART_ARCHIVE}"
+            /opt/deploy/deploy.sh "${RESOURCE_GROUP}" "${AKS_CLUSTER}" "${IMAGE_TAG}" "${ACR_SERVER}" "${{ env.AZURE_SUBSCRIPTION_ID }}" "${REMOTE_CHART_ARCHIVE}"
             REMOTE_SCRIPT
 
+            set +e
             DEPLOY_MESSAGE=$(az vm run-command invoke \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
               --scripts @invoke-deploy.sh \
             --query 'value[0].message' \
-            --output tsv)
+            --output tsv 2>&1)
+            DEPLOY_EXIT_CODE=$?
+            set -e
             echo ""
             echo "📋 Deployment Output:"
             echo "${DEPLOY_MESSAGE}"
+
+            if [ "${DEPLOY_EXIT_CODE}" -ne 0 ]; then
+              echo ""
+              echo "Azure VM Run Command failed with exit code ${DEPLOY_EXIT_CODE}"
+              exit "${DEPLOY_EXIT_CODE}"
+            fi
 
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -536,3 +540,4 @@ jobs:
           # Example: test API endpoints, verify pods are running, etc.
 
           echo "✅ Smoke tests completed"
+ 
