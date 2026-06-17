@@ -541,3 +541,4 @@ jobs:
           # Example: test API endpoints, verify pods are running, etc.
 
           echo "✅ Smoke tests completed"
+          echo "✅ Smoke tests completed"
