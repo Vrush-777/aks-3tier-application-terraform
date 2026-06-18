@@ -351,6 +351,7 @@ jobs:
             RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
             AKS_CLUSTER="${{ steps.terraform.outputs.aks_cluster }}"
             ACR_SERVER="${{ steps.terraform.outputs.acr_server }}"
+            SUBSCRIPTION_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
 
             echo "🚀 Starting deployment to private AKS cluster..."
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -359,24 +360,132 @@ jobs:
             echo "AKS Cluster: ${AKS_CLUSTER}"
             echo "Image Tag: ${IMAGE_TAG}"
             echo "ACR Server: ${ACR_SERVER}"
+            echo "Subscription ID: ${SUBSCRIPTION_ID}"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+            # ════════════════════════════════════════════════════════════════════
+            # DEBUG 1: Verify deploy-artifacts.tar.gz exists and has content
+            # ════════════════════════════════════════════════════════════════════
+            if [ ! -f deploy-artifacts.tar.gz ]; then
+              echo "❌ ERROR: deploy-artifacts.tar.gz not found"
+              exit 1
+            fi
+            
+            ARCHIVE_SIZE=$(stat -f%z deploy-artifacts.tar.gz 2>/dev/null || stat -c%s deploy-artifacts.tar.gz 2>/dev/null)
+            echo "✅ Archive file size: ${ARCHIVE_SIZE} bytes"
+
+            # ════════════════════════════════════════════════════════════════════
+            # Encode chart archive to base64 for transmission
+            # ════════════════════════════════════════════════════════════════════
             CHART_ARCHIVE_B64="$(base64 -w0 deploy-artifacts.tar.gz)"
             REMOTE_CHART_ARCHIVE="/tmp/deploy-artifacts-${{ github.run_id }}.tar.gz"
 
-            cat > invoke-deploy.sh <<REMOTE_SCRIPT
+            echo "✅ Base64 encoding complete (length: ${#CHART_ARCHIVE_B64} chars)"
+            echo "✅ Remote archive path: ${REMOTE_CHART_ARCHIVE}"
+
+            # ════════════════════════════════════════════════════════════════════
+            # FIXED: Generate invoke-deploy.sh with proper quoting and argument passing
+            # ════════════════════════════════════════════════════════════════════
+            cat > invoke-deploy.sh <<'DEPLOY_WRAPPER_SCRIPT'
+            #!/bin/bash
             set -e
 
-            cat > "${REMOTE_CHART_ARCHIVE}.b64" <<'CHART_ARCHIVE'
-            ${CHART_ARCHIVE_B64}
-            CHART_ARCHIVE
+            # Extract passed variables from the deployment script
+            CHART_ARCHIVE_B64_CONTENT="CHART_ARCHIVE_B64_PLACEHOLDER"
+            REMOTE_CHART_ARCHIVE="REMOTE_CHART_ARCHIVE_PLACEHOLDER"
+            RESOURCE_GROUP_ARG="RESOURCE_GROUP_PLACEHOLDER"
+            AKS_CLUSTER_ARG="AKS_CLUSTER_PLACEHOLDER"
+            IMAGE_TAG_ARG="IMAGE_TAG_PLACEHOLDER"
+            ACR_SERVER_ARG="ACR_SERVER_PLACEHOLDER"
+            SUBSCRIPTION_ID_ARG="SUBSCRIPTION_ID_PLACEHOLDER"
 
-            base64 -d "${REMOTE_CHART_ARCHIVE}.b64" > "${REMOTE_CHART_ARCHIVE}"
-            rm -f "${REMOTE_CHART_ARCHIVE}.b64"
+            echo "────────────────────────────────────────────────────────────"
+            echo "📝 Deployment Arguments Received:"
+            echo "────────────────────────────────────────────────────────────"
+            echo "Arg 1 (RESOURCE_GROUP): '${RESOURCE_GROUP_ARG}'"
+            echo "Arg 2 (AKS_CLUSTER): '${AKS_CLUSTER_ARG}'"
+            echo "Arg 3 (IMAGE_TAG): '${IMAGE_TAG_ARG}'"
+            echo "Arg 4 (ACR_SERVER): '${ACR_SERVER_ARG}'"
+            echo "Arg 5 (SUBSCRIPTION_ID): '${SUBSCRIPTION_ID_ARG}'"
+            echo "Arg 6 (CHART_ARCHIVE): '${REMOTE_CHART_ARCHIVE}'"
+            echo "────────────────────────────────────────────────────────────"
 
-            echo "Invoking deploy.sh with chart archive: ${REMOTE_CHART_ARCHIVE}"
-            /opt/deploy/deploy.sh "${RESOURCE_GROUP}" "${AKS_CLUSTER}" "${IMAGE_TAG}" "${ACR_SERVER}" "${{ env.AZURE_SUBSCRIPTION_ID }}" "${REMOTE_CHART_ARCHIVE}"
-            REMOTE_SCRIPT
+            # Decode base64 chart archive
+            echo ""
+            echo "📦 Decoding chart archive..."
+            echo "${CHART_ARCHIVE_B64_CONTENT}" | base64 -d > "${REMOTE_CHART_ARCHIVE}"
+            
+            if [ ! -f "${REMOTE_CHART_ARCHIVE}" ]; then
+              echo "❌ ERROR: Failed to decode chart archive"
+              exit 1
+            fi
+            
+            ARCHIVE_SIZE=$(stat -f%z "${REMOTE_CHART_ARCHIVE}" 2>/dev/null || stat -c%s "${REMOTE_CHART_ARCHIVE}" 2>/dev/null)
+            echo "✅ Chart archive decoded: ${ARCHIVE_SIZE} bytes at ${REMOTE_CHART_ARCHIVE}"
+
+            # Validate deploy.sh exists
+            if [ ! -x /opt/deploy/deploy.sh ]; then
+              echo "❌ ERROR: /opt/deploy/deploy.sh not found or not executable"
+              ls -la /opt/deploy/ || true
+              exit 1
+            fi
+
+            echo ""
+            echo "🚀 Invoking deploy.sh with all arguments..."
+            echo "────────────────────────────────────────────────────────────"
+
+            # Call deploy.sh with all 6 required arguments
+            # Using eval with quoted arguments to preserve whitespace
+            eval "/opt/deploy/deploy.sh" \
+              "\"${RESOURCE_GROUP_ARG}\"" \
+              "\"${AKS_CLUSTER_ARG}\"" \
+              "\"${IMAGE_TAG_ARG}\"" \
+              "\"${ACR_SERVER_ARG}\"" \
+              "\"${SUBSCRIPTION_ID_ARG}\"" \
+              "\"${REMOTE_CHART_ARCHIVE}\""
+
+            DEPLOY_RESULT=$?
+
+            echo "────────────────────────────────────────────────────────────"
+            if [ ${DEPLOY_RESULT} -eq 0 ]; then
+              echo "✅ Deploy script exited successfully"
+            else
+              echo "❌ Deploy script exited with code: ${DEPLOY_RESULT}"
+              exit ${DEPLOY_RESULT}
+            fi
+            DEPLOY_WRAPPER_SCRIPT
+
+            # ════════════════════════════════════════════════════════════════════
+            # DEBUG 2: Substitute actual values into the wrapper script
+            # ════════════════════════════════════════════════════════════════════
+            sed -i "s|CHART_ARCHIVE_B64_PLACEHOLDER|${CHART_ARCHIVE_B64}|g" invoke-deploy.sh
+            sed -i "s|REMOTE_CHART_ARCHIVE_PLACEHOLDER|${REMOTE_CHART_ARCHIVE}|g" invoke-deploy.sh
+            sed -i "s|RESOURCE_GROUP_PLACEHOLDER|${RESOURCE_GROUP}|g" invoke-deploy.sh
+            sed -i "s|AKS_CLUSTER_PLACEHOLDER|${AKS_CLUSTER}|g" invoke-deploy.sh
+            sed -i "s|IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g" invoke-deploy.sh
+            sed -i "s|ACR_SERVER_PLACEHOLDER|${ACR_SERVER}|g" invoke-deploy.sh
+            sed -i "s|SUBSCRIPTION_ID_PLACEHOLDER|${SUBSCRIPTION_ID}|g" invoke-deploy.sh
+
+            # ════════════════════════════════════════════════════════════════════
+            # DEBUG 3: Print the complete generated invoke-deploy.sh (without base64)
+            # ════════════════════════════════════════════════════════════════════
+            echo ""
+            echo "📄 Generated invoke-deploy.sh (first 100 lines):"
+            echo "════════════════════════════════════════════════════════════════════"
+            head -100 invoke-deploy.sh | sed 's/[A-Za-z0-9+/=]\{64,\}/<<<BASE64_CONTENT_TRUNCATED>>>/g'
+            echo "════════════════════════════════════════════════════════════════════"
+            echo ""
+
+            # Verify script size
+            SCRIPT_SIZE=$(wc -c < invoke-deploy.sh)
+            echo "✅ Generated script size: ${SCRIPT_SIZE} bytes"
+            echo ""
+
+            # ════════════════════════════════════════════════════════════════════
+            # DEBUG 4: Execute the deployment script on Jump VM
+            # ════════════════════════════════════════════════════════════════════
+            echo "🌐 Sending deployment script to Jump VM: ${JUMP_VM_NAME}"
+            echo ""
 
             set +e
             DEPLOY_MESSAGE=$(az vm run-command invoke \
@@ -384,24 +493,28 @@ jobs:
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
               --scripts "$(cat invoke-deploy.sh)" \
-            --query 'value[0].message' \
-            --output tsv 2>&1)
+              --query 'value[0].message' \
+              --output tsv 2>&1)
             DEPLOY_EXIT_CODE=$?
             set -e
+
             echo ""
             echo "📋 Deployment Output:"
+            echo "════════════════════════════════════════════════════════════════════"
             echo "${DEPLOY_MESSAGE}"
+            echo "════════════════════════════════════════════════════════════════════"
+            echo ""
 
             if [ "${DEPLOY_EXIT_CODE}" -ne 0 ]; then
               echo ""
-              echo "Azure VM Run Command failed with exit code ${DEPLOY_EXIT_CODE}"
+              echo "❌ Azure VM Run Command failed with exit code ${DEPLOY_EXIT_CODE}"
               exit "${DEPLOY_EXIT_CODE}"
             fi
 
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-            # FIX 1: Check for deployment success marker
+            # DEBUG 5: Verify deployment success
             # deploy.sh MUST print "DEPLOYMENT_STATUS=SUCCESS" on successful completion
             if ! echo "${DEPLOY_MESSAGE}" | grep -q "DEPLOYMENT_STATUS=SUCCESS"; then
               echo "❌ Deployment failed on Jump VM"
