@@ -469,6 +469,7 @@ write_files:
       log "✅ AKS credentials obtained"
       log ""
 
+
       # Step 4: Deploy Helm chart
       log "Building Helm chart dependencies..."
       helm dependency build "${CHART_DIR}" 2>&1 | tee -a "${LOG_FILE}"
