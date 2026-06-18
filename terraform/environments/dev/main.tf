@@ -240,7 +240,6 @@ module "aks" {
   source = "../../modules/aks"
 
   aks_cluster_name              = var.aks_cluster_name
-  aks_managed_identity_principal_id = var.aks_managed_identity_principal_id
   location                      = module.resource_group.location
   resource_group_name           = module.resource_group.resource_group_name
   kubernetes_version            = var.kubernetes_version
@@ -279,7 +278,5 @@ module "aks" {
   maintenance_window_duration   = var.aks_maintenance_window_duration
   maintenance_window_start_time = var.aks_maintenance_window_start_time
   additional_node_pools         = var.aks_additional_node_pools
-  kubelet_role_assignment_id    = module.managed_identity.kubelet_acr_pull_role_assignment_id
-  aks_role_assignment_id        = module.managed_identity.aks_contributor_role_assignment_id
   common_tags                   = var.common_tags
 }

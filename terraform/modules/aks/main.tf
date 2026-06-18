@@ -102,7 +102,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   # ---------------------------------------------------------
   # SECURITY
   # ---------------------------------------------------------
-  local_account_disabled = false
+  local_account_disabled = true
 
   tags = merge(
     var.common_tags,
@@ -110,23 +110,6 @@ resource "azurerm_kubernetes_cluster" "aks" {
       Name = var.aks_cluster_name
     }
   )
-
-  depends_on = [
-    var.kubelet_role_assignment_id,
-    var.aks_role_assignment_id
-  ]
-}
-
-# =========================================================
-# FIX: GRANT VM MANAGED IDENTITY AKS RBAC ACCESS
-# =========================================================
-resource "azurerm_role_assignment" "aks_vm_cluster_admin" {
-  scope = azurerm_kubernetes_cluster.aks.id
-
-  role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
-
-  # MUST be principalId of VM managed identity
-  principal_id = var.aks_managed_identity_principal_id
 }
 
 # =========================================================

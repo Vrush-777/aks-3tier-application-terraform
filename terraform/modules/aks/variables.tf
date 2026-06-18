@@ -264,23 +264,8 @@ variable "additional_node_pools" {
   default = {}
 }
 
-variable "kubelet_role_assignment_id" {
-  description = "ID of the kubelet role assignment (for dependency)"
-  type        = string
-}
-
-variable "aks_role_assignment_id" {
-  description = "ID of the AKS role assignment (for dependency)"
-  type        = string
-}
-
 variable "common_tags" {
   description = "Common tags for all resources"
   type        = map(string)
   default     = {}
-}
-
-variable "aks_managed_identity_principal_id" {
-  description = "Principal ID of Jump VM managed identity"
-  type        = string
 }
