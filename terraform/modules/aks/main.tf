@@ -1,28 +1,16 @@
-# AKS Module - main.tf
-# Creates a private AKS cluster with managed identity and AGIC support
+# =========================================================
+# AKS MODULE - PRIVATE CLUSTER + AAD RBAC + VM ACCESS FIX
+# =========================================================
 
 resource "azurerm_kubernetes_cluster" "aks" {
-  # ==========================================================================
-  # SAFETY CHECK: AKS MUST NOT BE DEPLOYED WITHOUT ENTRA ADMIN GROUPS
-  # ==========================================================================
-  # This lifecycle precondition is a hard runtime guard. Even if Terraform
-  # validation passes at plan time, this ensures the apply itself fails if
-  # admin_group_object_ids is somehow empty at runtime.
-  #
-  # This prevents the scenario where AKS is deployed but has NO Entra
-  # administrator groups configured, leaving the cluster unmanageable
-  # (local accounts are disabled, and no admins can authenticate).
+
+  # ---------------------------------------------------------
+  # SAFETY CHECK: ENSURE ENTRA ADMIN GROUP EXISTS
+  # ---------------------------------------------------------
   lifecycle {
     precondition {
       condition     = length(var.admin_group_object_ids) > 0
-      error_message = <<-EOT
-        Fatal: AKS cluster cannot be deployed without Entra administrator groups.
-        Either:
-          1. Set aks_admin_group_object_ids in terraform.tfvars with at least one Entra group Object ID, OR
-          2. Set create_admin_group = true to let Terraform create the group.
-        Without this, the cluster will be deployed with NO administrative access,
-        and no one will be able to run kubectl commands against it.
-      EOT
+      error_message = "Fatal: AKS cluster requires at least one Entra admin group."
     }
   }
 
@@ -32,7 +20,9 @@ resource "azurerm_kubernetes_cluster" "aks" {
   kubernetes_version  = var.kubernetes_version
   dns_prefix          = var.aks_cluster_name
 
-  # Default Node Pool
+  # ---------------------------------------------------------
+  # DEFAULT NODE POOL
+  # ---------------------------------------------------------
   default_node_pool {
     name            = var.default_node_pool_name
     node_count      = var.default_node_pool_count
@@ -40,49 +30,53 @@ resource "azurerm_kubernetes_cluster" "aks" {
     vnet_subnet_id  = var.aks_subnet_id
     os_disk_size_gb = var.os_disk_size_gb
 
-    # Auto-scaling
     enable_auto_scaling = var.enable_auto_scaling
     min_count           = var.min_count
     max_count           = var.max_count
 
-    # Availability zones
-    zones = var.availability_zones
-
-    # Node labels
-    node_labels = var.node_labels
-
-    # Node taints
-    node_taints = var.node_taints
+    zones        = var.availability_zones
+    node_labels  = var.node_labels
+    node_taints  = var.node_taints
   }
 
-  # Network settings - Azure CNI with managed identity
+  # ---------------------------------------------------------
+  # NETWORK PROFILE
+  # ---------------------------------------------------------
   network_profile {
-    network_plugin     = var.network_plugin # "azure" for Azure CNI
-    network_policy     = var.network_policy
-    dns_service_ip     = var.dns_service_ip != "" ? var.dns_service_ip : null
-    service_cidr       = var.service_cidr != "" ? var.service_cidr : null
-    load_balancer_sku  = "standard"
-    outbound_type      = var.outbound_type
+    network_plugin    = var.network_plugin
+    network_policy    = var.network_policy
+    dns_service_ip    = var.dns_service_ip != "" ? var.dns_service_ip : null
+    service_cidr      = var.service_cidr != "" ? var.service_cidr : null
+    load_balancer_sku = "standard"
+    outbound_type     = var.outbound_type
   }
 
-  # Private cluster configuration
+  # ---------------------------------------------------------
+  # PRIVATE CLUSTER CONFIG
+  # ---------------------------------------------------------
   private_cluster_enabled = var.private_cluster_enabled
   private_dns_zone_id     = var.private_dns_zone_id != "" ? var.private_dns_zone_id : null
 
-  # Managed Identity
+  # ---------------------------------------------------------
+  # MANAGED IDENTITY (AKS CONTROL PLANE)
+  # ---------------------------------------------------------
   identity {
     type         = "UserAssigned"
     identity_ids = [var.aks_managed_identity_id]
   }
 
-  # Kubelet Managed Identity
+  # ---------------------------------------------------------
+  # KUBELET IDENTITY
+  # ---------------------------------------------------------
   kubelet_identity {
     client_id                 = var.kubelet_client_id
     object_id                 = var.kubelet_object_id
     user_assigned_identity_id = var.kubelet_identity_id
   }
 
-  # RBAC Settings
+  # ---------------------------------------------------------
+  # RBAC ENABLED
+  # ---------------------------------------------------------
   role_based_access_control_enabled = true
 
   azure_active_directory_role_based_access_control {
@@ -90,60 +84,25 @@ resource "azurerm_kubernetes_cluster" "aks" {
     admin_group_object_ids = var.admin_group_object_ids
   }
 
-  # Ingress - Application Gateway Integration
+  # ---------------------------------------------------------
+  # AGIC INTEGRATION
+  # ---------------------------------------------------------
   ingress_application_gateway {
     gateway_id = var.appgw_id
-    # gateway_name              = var.appgw_name
-    # subnet_cidr               = var.appgw_subnet_cidr
-    # subnet_id                 = var.appgw_subnet_id
   }
 
-  # Add-ons
   http_application_routing_enabled = false
 
-
-
-  # addon_profile {
-  #   azure_policy {
-  #     enabled = var.enable_azure_policy
-  #   }
-
-  #   kube_dashboard {
-  #     enabled = false  # Dashboard is deprecated
-  #   }
-  # }
-
-  # Auto-upgrade channel
+  # ---------------------------------------------------------
+  # UPGRADE CHANNELS
+  # ---------------------------------------------------------
   automatic_channel_upgrade = var.automatic_channel_upgrade
+  node_os_channel_upgrade   = var.node_os_channel_upgrade
 
-  # Node OS Channel
-  node_os_channel_upgrade = var.node_os_channel_upgrade
-
-  # # Maintenance Window (optional)
-  # dynamic "maintenance_window" {
-  #   for_each = var.enable_maintenance_window ? [1] : []
-  #   content {
-  #     day_of_week = var.maintenance_window_day
-  #     duration    = var.maintenance_window_duration
-  #     start_time  = var.maintenance_window_start_time
-  #   }
-  # }
-
-  # # Maintenance Window - Node OS
-  # dynamic "maintenance_window_node_os" {
-  #   for_each = var.enable_node_os_maintenance_window ? [1] : []
-  #   content {
-  #     day_of_week = var.node_os_maintenance_window_day
-  #     duration    = var.node_os_maintenance_window_duration
-  #     start_time  = var.node_os_maintenance_window_start_time
-  #   }
-  # }
-
-  # Pod Security Policy (deprecated but can be configured)
-  # Shift to use Azure Policy instead
-
-  # Local Account Disabled
-  local_account_disabled = true
+  # ---------------------------------------------------------
+  # SECURITY
+  # ---------------------------------------------------------
+  local_account_disabled = false
 
   tags = merge(
     var.common_tags,
@@ -158,17 +117,33 @@ resource "azurerm_kubernetes_cluster" "aks" {
   ]
 }
 
-# Additional Node Pool (optional GPU or spot VMs)
+# =========================================================
+# FIX: GRANT VM MANAGED IDENTITY AKS RBAC ACCESS
+# =========================================================
+resource "azurerm_role_assignment" "aks_vm_cluster_admin" {
+  scope = azurerm_kubernetes_cluster.aks.id
+
+  role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
+
+  # MUST be principalId of VM managed identity
+  principal_id = var.aks_managed_identity_principal_id
+}
+
+# =========================================================
+# ADDITIONAL NODE POOLS
+# =========================================================
 resource "azurerm_kubernetes_cluster_node_pool" "additional_node_pool" {
+
   for_each = var.additional_node_pools
 
   name                  = each.key
   kubernetes_cluster_id = azurerm_kubernetes_cluster.aks.id
-  node_count            = each.value.node_count
-  vm_size               = each.value.vm_size
-  zones                 = var.availability_zones
-  vnet_subnet_id        = var.aks_subnet_id
-  os_disk_size_gb       = each.value.os_disk_size_gb
+
+  node_count      = each.value.node_count
+  vm_size         = each.value.vm_size
+  zones           = var.availability_zones
+  vnet_subnet_id  = var.aks_subnet_id
+  os_disk_size_gb = each.value.os_disk_size_gb
 
   enable_auto_scaling = each.value.enable_auto_scaling
   min_count           = each.value.min_count
@@ -177,7 +152,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "additional_node_pool" {
   node_labels = each.value.node_labels
   node_taints = each.value.node_taints
 
-  priority        = each.value.priority # "Regular" or "Spot"
+  priority        = each.value.priority
   eviction_policy = each.value.priority == "Spot" ? "Delete" : null
   spot_max_price  = each.value.priority == "Spot" ? each.value.spot_max_price : null
 

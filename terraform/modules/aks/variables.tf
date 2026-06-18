@@ -279,3 +279,8 @@ variable "common_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "aks_managed_identity_principal_id" {
+  description = "Principal ID of Jump VM managed identity"
+  type        = string
+}
