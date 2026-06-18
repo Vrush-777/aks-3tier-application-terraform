@@ -584,3 +584,7 @@ variable "log_analytics_workspace_id" {
   type        = string
   default     = ""
 }
+
+variable "aks_managed_identity_principal_id" {
+  type = string
+}

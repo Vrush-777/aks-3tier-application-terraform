@@ -240,6 +240,7 @@ module "aks" {
   source = "../../modules/aks"
 
   aks_cluster_name              = var.aks_cluster_name
+  aks_managed_identity_principal_id = var.aks_managed_identity_principal_id
   location                      = module.resource_group.location
   resource_group_name           = module.resource_group.resource_group_name
   kubernetes_version            = var.kubernetes_version
