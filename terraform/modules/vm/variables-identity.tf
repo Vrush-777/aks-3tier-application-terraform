@@ -1,16 +1,16 @@
 # Identity variables for Jump VM
 # These enable the Jump VM to authenticate to Azure services using Managed Identity
 
+variable "aks_cluster_id" {
+  description = "AKS Cluster Resource ID"
+  type        = string
+}
+
+
 variable "enable_managed_identity" {
   type        = bool
   description = "Enable System Assigned Managed Identity for the Jump VM"
   default     = true
-}
-
-variable "aks_cluster_id" {
-  type        = string
-  description = "Resource ID of the AKS cluster (needed for role assignment)"
-  default     = ""
 }
 
 variable "acr_id" {
