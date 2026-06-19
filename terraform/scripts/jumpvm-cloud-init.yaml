@@ -1,4 +1,4 @@
-#cloud-config
+# cloud-config file
 package_update: false
 package_upgrade: false
 
