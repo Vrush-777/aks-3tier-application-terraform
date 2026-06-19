@@ -1,0 +1,738 @@
+# cloud-config
+# Enhanced Cloud-Init for AKS Jump VM Bootstrap
+# 
+# IMPROVEMENTS:
+# - Idempotent execution (safe to run multiple times)
+# - Comprehensive logging with structured format
+# - Bootstrap completion marker for verification
+# - Pre-requisite validation and error aggregation
+# - Tool installation validation after each step
+# - Better error handling with clear diagnostics
+#
+# Log files created:
+#   /var/log/cloud-init-output.log      - Cloud-init output
+#   /var/log/bootstrap-jumpvm.log       - Bootstrap script logs
+#   /opt/deploy/.bootstrap-complete     - Completion marker (created on success)
+#   /opt/deploy/.bootstrap-diagnostics  - Diagnostic output on failure
+
+package_update: false
+package_upgrade: false
+
+output:
+  all: "| tee -a /var/log/cloud-init-output.log"
+
+write_files:
+  # ============================================================================
+  # Bootstrap Script for AKS Jump VM Setup
+  # ============================================================================
+  - path: /usr/local/sbin/bootstrap-jumpvm.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      #=============================================================================
+      # bootstrap-jumpvm.sh — Enhanced AKS Jump VM Setup with Idempotency
+      #
+      # This script:
+      # - Runs idempotently (checks for previous completion)
+      # - Logs all operations to structured files
+      # - Creates a completion marker upon success
+      # - Collects diagnostics on failure
+      #
+      # Exit codes:
+      #   0 = Success
+      #   1 = Error during setup
+      #   2 = System preconditions not met
+      #
+      # Log Files:
+      #   /var/log/bootstrap-jumpvm.log    - Detailed operations
+      #   /opt/deploy/.bootstrap-complete  - Success marker
+      #   /opt/deploy/.bootstrap-failed    - Failure marker
+      #=============================================================================
+      set -Eeuo pipefail
+
+      export DEBIAN_FRONTEND=noninteractive
+      export NEEDRESTART_MODE=a
+      export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+      BOOTSTRAP_LOG="/var/log/bootstrap-jumpvm.log"
+      BOOTSTRAP_MARKER="/opt/deploy/.bootstrap-complete"
+      BOOTSTRAP_FAILED_MARKER="/opt/deploy/.bootstrap-failed"
+      DIAGNOSTICS_FILE="/opt/deploy/.bootstrap-diagnostics"
+      KUBECTL_VERSION="${KUBECTL_VERSION:-__KUBECTL_VERSION__}"
+      KUBELOGIN_VERSION="${KUBELOGIN_VERSION:-__KUBELOGIN_VERSION__}"
+
+      # Ensure bootstrap log directory exists
+      mkdir -p "$(dirname "${BOOTSTRAP_LOG}")" "$(dirname "${BOOTSTRAP_MARKER}")"
+
+      # Redirect output to log file (append mode)
+      exec > >(tee -a "${BOOTSTRAP_LOG}") 2>&1
+
+      #=============================================================================
+      # Logging and Error Handling Functions
+      #=============================================================================
+      log() {
+        echo "[$(date --iso-8601=seconds)] [INFO] $*"
+      }
+
+      log_section() {
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "  $*"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+      }
+
+      warn() {
+        echo "[$(date --iso-8601=seconds)] [WARN] $*" >&2
+      }
+
+      fail() {
+        echo "[$(date --iso-8601=seconds)] [ERROR] $*" >&2
+        emit_diagnostics_on_failure
+        exit 1
+      }
+
+      on_error() {
+        local exit_code=$?
+        local line_no=$1
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo "║  ERROR: Bootstrap failed at line ${line_no}"
+        echo "║  Exit Code: ${exit_code}"
+        echo "║  Time: $(date --iso-8601=seconds)"
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        emit_diagnostics_on_failure
+        exit "${exit_code}"
+      }
+
+      emit_diagnostics_on_failure() {
+        {
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "BOOTSTRAP FAILURE DIAGNOSTICS"
+          echo "Time: $(date --iso-8601=seconds)"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+          echo "System Resources:"
+          echo "───────────────────────────────────────────────────────────────"
+          free -h || true
+          echo ""
+          df -h || true
+          echo ""
+          echo "Installed Tools:"
+          echo "───────────────────────────────────────────────────────────────"
+          which az || echo "  ❌ az not found"
+          which kubectl || echo "  ❌ kubectl not found"
+          which helm || echo "  ❌ helm not found"
+          which kubelogin || echo "  ❌ kubelogin not found"
+          echo ""
+          echo "Directory Structure:"
+          echo "───────────────────────────────────────────────────────────────"
+          ls -la /opt/deploy/ || echo "  ❌ /opt/deploy/ not found"
+          echo ""
+          echo "Apt Lock Status:"
+          echo "───────────────────────────────────────────────────────────────"
+          lsof /var/lib/apt/lists/lock 2>/dev/null || echo "  ✅ No apt lock"
+          lsof /var/lib/dpkg/lock-frontend 2>/dev/null || echo "  ✅ No dpkg lock"
+          echo ""
+          echo "Recent Log Entries:"
+          echo "───────────────────────────────────────────────────────────────"
+          tail -50 "${BOOTSTRAP_LOG}" 2>/dev/null || echo "  ⚠️ Could not read log"
+        } | tee -a "${DIAGNOSTICS_FILE}" >&2
+      }
+
+      trap 'on_error $LINENO' ERR
+
+      #=============================================================================
+      # Idempotency Check
+      #=============================================================================
+      check_idempotency() {
+        if [ -f "${BOOTSTRAP_MARKER}" ]; then
+          log_section "Bootstrap Previously Completed (Idempotent Mode)"
+          log "Marker file: ${BOOTSTRAP_MARKER}"
+          log "Previous completion: $(stat -c '%y' "${BOOTSTRAP_MARKER}" 2>/dev/null || echo 'unknown')"
+          log "Skipping re-initialization"
+          return 0
+        fi
+        return 1
+      }
+
+      #=============================================================================
+      # System Precondition Checks
+      #=============================================================================
+      check_system_preconditions() {
+        log_section "Checking System Preconditions"
+        
+        # Check if running as root
+        if [ "$(id -u)" -ne 0 ]; then
+          fail "This script must run as root"
+        fi
+        log "✅ Running as root"
+
+        # Check for minimum disk space (1 GB required)
+        local available_space
+        available_space=$(df /var | tail -1 | awk '{print $4}')
+        if [ "${available_space}" -lt 1048576 ]; then
+          fail "Insufficient disk space (need 1GB, have ${available_space}KB)"
+        fi
+        log "✅ Sufficient disk space available"
+
+        # Check if systemd is available
+        if ! command -v systemctl &>/dev/null; then
+          fail "systemd not found"
+        fi
+        log "✅ systemd is available"
+
+        # Check if cloud-init completed (early check)
+        if [ -f "/var/lib/cloud/instance/boot-finished" ]; then
+          log "✅ Cloud-init networking phase completed"
+        else
+          warn "Cloud-init may still be initializing"
+        fi
+      }
+
+      #=============================================================================
+      # Apt Lock Management
+      #=============================================================================
+      wait_for_apt() {
+        log "Waiting for apt/dpkg locks to be released..."
+        local attempts=30
+        local count=0
+
+        while (fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+               fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+               fuser /var/lib/apt/lists/lock >/dev/null 2>&1); do
+          if [ "${count}" -ge "${attempts}" ]; then
+            fail "Timeout waiting for apt locks (attempted ${attempts} times)"
+          fi
+          sleep 2
+          count=$((count + 1))
+        done
+
+        log "✅ Apt locks released"
+      }
+
+      #=============================================================================
+      # Package Installation with Validation
+      #=============================================================================
+      install_base_packages() {
+        log_section "Installing Base Packages"
+        
+        wait_for_apt
+        log "Running apt-get update..."
+        apt-get update -y -qq || fail "apt-get update failed"
+        
+        log "Installing packages..."
+        apt-get install -y -qq --no-install-recommends \
+          apt-transport-https \
+          ca-certificates \
+          curl \
+          gpg \
+          git \
+          jq \
+          lsb-release \
+          software-properties-common \
+          unzip \
+          wget \
+          || fail "apt-get install failed"
+
+        log "✅ Base packages installed"
+        log "Verifying base tools..."
+        command -v curl >/dev/null || fail "curl not found after install"
+        command -v jq >/dev/null || fail "jq not found after install"
+        command -v wget >/dev/null || fail "wget not found after install"
+        log "✅ Base tools verified"
+      }
+
+      install_azure_cli() {
+        log_section "Installing Azure CLI"
+        
+        # Check if already installed
+        if command -v az &>/dev/null; then
+          local installed_version
+          installed_version=$(az version -o json 2>/dev/null | jq -r '.'"'"'azure-cli'"'"'' || echo "unknown")
+          log "⏭️  Azure CLI already installed (version ${installed_version})"
+          return 0
+        fi
+
+        install -d -m 0755 /etc/apt/keyrings
+
+        log "Downloading Microsoft GPG key..."
+        curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /tmp/microsoft.asc \
+          || fail "Failed to download Microsoft GPG key"
+        
+        gpg --dearmor < /tmp/microsoft.asc > /etc/apt/keyrings/microsoft.gpg \
+          || fail "Failed to process GPG key"
+        chmod 0644 /etc/apt/keyrings/microsoft.gpg
+
+        local distro
+        distro="$(lsb_release -cs)"
+        log "Configuring Azure CLI APT repository (${distro})..."
+        
+        cat > /etc/apt/sources.list.d/azure-cli.sources <<EOF
+      Types: deb
+      URIs: https://packages.microsoft.com/repos/azure-cli/
+      Suites: ${distro}
+      Components: main
+      Architectures: amd64
+      Signed-By: /etc/apt/keyrings/microsoft.gpg
+      EOF
+
+        wait_for_apt
+        log "Updating APT cache..."
+        apt-get update -y -qq || fail "apt-get update failed for Azure CLI"
+        
+        log "Installing Azure CLI..."
+        apt-get install -y -qq --no-install-recommends azure-cli \
+          || fail "apt-get install azure-cli failed"
+
+        log "✅ Azure CLI installed"
+        log "Verifying Azure CLI..."
+        command -v az >/dev/null || fail "az not found after install"
+        az version -o json | head -5
+      }
+
+      install_kubectl() {
+        log_section "Installing kubectl ${KUBECTL_VERSION}"
+        
+        # Validate version format
+        if ! [[ "${KUBECTL_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          fail "Invalid kubectl version format: ${KUBECTL_VERSION} (expected v1.XX.X)"
+        fi
+
+        # Check if already installed with correct version
+        if command -v kubectl &>/dev/null; then
+          local installed_version
+          installed_version=$(kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' || echo "unknown")
+          if [ "${installed_version}" = "${KUBECTL_VERSION}" ]; then
+            log "⏭️  kubectl ${KUBECTL_VERSION} already installed"
+            return 0
+          fi
+          log "Updating kubectl from ${installed_version} to ${KUBECTL_VERSION}"
+        fi
+
+        log "Downloading kubectl binary..."
+        curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+          || fail "Failed to download kubectl"
+        
+        log "Verifying kubectl checksum..."
+        curl -fsSLo /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" \
+          || fail "Failed to download kubectl checksum"
+        
+        echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum --check \
+          || fail "kubectl checksum verification failed"
+
+        log "Installing kubectl..."
+        install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+        rm -f /tmp/kubectl /tmp/kubectl.sha256
+
+        log "✅ kubectl ${KUBECTL_VERSION} installed"
+        log "Verifying kubectl..."
+        kubectl version --client
+      }
+
+      install_helm() {
+        log_section "Installing Helm 3"
+        
+        # Check if already installed
+        if command -v helm &>/dev/null; then
+          local installed_version
+          installed_version=$(helm version --short 2>/dev/null || echo "unknown")
+          log "⏭️  Helm already installed (${installed_version})"
+          return 0
+        fi
+
+        local expected_key_id="DDF78C3E6EBB2D2CC223C95C62BA89D07698DBC6"
+        local actual_key_id
+
+        install -d -m 0755 /etc/apt/keyrings
+
+        log "Downloading Helm GPG key..."
+        curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey -o /tmp/helm.gpgkey \
+          || fail "Failed to download Helm GPG key"
+        
+        actual_key_id="$(gpg --show-keys --with-colons /tmp/helm.gpgkey 2>/dev/null | awk -F: '$1 == "fpr" {print $10}' | head -n 1)"
+        if [ "${actual_key_id}" != "${expected_key_id}" ]; then
+          fail "Unexpected Helm APT key fingerprint: ${actual_key_id} (expected ${expected_key_id})"
+        fi
+        log "✅ Helm GPG key verified (${actual_key_id})"
+
+        gpg --dearmor < /tmp/helm.gpgkey > /etc/apt/keyrings/helm.gpg
+        chmod 0644 /etc/apt/keyrings/helm.gpg
+
+        cat > /etc/apt/sources.list.d/helm-stable-debian.sources <<EOF
+      Types: deb
+      URIs: https://packages.buildkite.com/helm-linux/helm-debian/any/
+      Suites: any
+      Components: main
+      Signed-By: /etc/apt/keyrings/helm.gpg
+      EOF
+
+        wait_for_apt
+        log "Updating APT cache..."
+        apt-get update -y -qq || fail "apt-get update failed for Helm"
+        
+        log "Installing Helm..."
+        apt-get install -y -qq --no-install-recommends helm \
+          || fail "apt-get install helm failed"
+
+        log "✅ Helm installed"
+        log "Verifying Helm..."
+        command -v helm >/dev/null || fail "helm not found after install"
+        helm version
+      }
+
+      install_kubelogin() {
+        log_section "Installing kubelogin ${KUBELOGIN_VERSION}"
+        
+        # Validate version format
+        if ! [[ "${KUBELOGIN_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          fail "Invalid kubelogin version format: ${KUBELOGIN_VERSION} (expected v0.X.X)"
+        fi
+
+        # Check if already installed
+        if command -v kubelogin &>/dev/null; then
+          local installed_version
+          installed_version=$(kubelogin --version 2>&1 | head -1 || echo "unknown")
+          if echo "${installed_version}" | grep -q "${KUBELOGIN_VERSION}"; then
+            log "⏭️  kubelogin ${KUBELOGIN_VERSION} already installed"
+            return 0
+          fi
+          log "Updating kubelogin to ${KUBELOGIN_VERSION}"
+        fi
+
+        log "Downloading kubelogin archive..."
+        curl -fsSLo /tmp/kubelogin.zip "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip" \
+          || fail "Failed to download kubelogin"
+        
+        log "Verifying kubelogin checksum..."
+        curl -fsSLo /tmp/kubelogin.zip.sha256 "https://github.com/Azure/kubelogin/releases/download/${KUBELOGIN_VERSION}/kubelogin-linux-amd64.zip.sha256" \
+          || fail "Failed to download kubelogin checksum"
+        
+        local expected_sha
+        expected_sha="$(sed -E 's/^sha256://; s/[[:space:]].*$//' /tmp/kubelogin.zip.sha256)"
+        echo "${expected_sha}  /tmp/kubelogin.zip" | sha256sum --check \
+          || fail "kubelogin checksum verification failed"
+
+        log "Extracting kubelogin..."
+        rm -rf /tmp/kubelogin
+        mkdir -p /tmp/kubelogin
+        unzip -q /tmp/kubelogin.zip -d /tmp/kubelogin
+        
+        log "Installing kubelogin..."
+        install -m 0755 /tmp/kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/kubelogin
+        rm -rf /tmp/kubelogin /tmp/kubelogin.zip /tmp/kubelogin.zip.sha256
+
+        log "✅ kubelogin ${KUBELOGIN_VERSION} installed"
+        log "Verifying kubelogin..."
+        command -v kubelogin >/dev/null || fail "kubelogin not found after install"
+        kubelogin --version
+      }
+
+      configure_jumpvm_profile() {
+        log_section "Configuring Jump VM Profile and Helper Scripts"
+        
+        mkdir -p /opt/deploy/logs
+
+        log "Creating /etc/profile.d/aks-tools.sh..."
+        cat > /etc/profile.d/aks-tools.sh <<'EOF'
+      export PATH="/opt/deploy:/usr/local/bin:$PATH"
+      alias k='kubectl'
+      alias h='helm'
+      alias kgp='kubectl get pods'
+      alias kdesc='kubectl describe'
+      alias klogs='kubectl logs'
+
+      # Print a banner with login instructions on interactive shell
+      if [ -n "$PS1" ]; then
+        echo ""
+        echo "======================================================================"
+        echo "  Welcome to the AKS Jump VM"
+        echo ""
+        echo "  To connect to the AKS cluster, authenticate with your own identity:"
+        echo "    az login --use-device-code"
+        echo "    az account set --subscription <subscription-id>"
+        echo "    az aks get-credentials --resource-group <rg> --name <cluster>"
+        echo "    kubelogin convert-kubeconfig -l azurecli"
+        echo "    kubectl get nodes"
+        echo "======================================================================"
+        echo ""
+      fi
+      EOF
+
+        # Create deploy scripts (simplified for readability)
+        log "Creating /opt/deploy/aks-admin-login.sh..."
+        cat > /opt/deploy/aks-admin-login.sh <<'LOGINEOF'
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      RESOURCE_GROUP="${1:?Usage: aks-admin-login.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      AKS_CLUSTER_NAME="${2:?Usage: aks-admin-login.sh <resource-group> <aks-cluster-name> [subscription-id]}"
+      SUBSCRIPTION_ID="${3:-}"
+
+      echo ""
+      echo "============================================================"
+      echo "  AKS Admin Login — User Identity Authentication"
+      echo "============================================================"
+      echo ""
+
+      if ! az account show 2>/dev/null | grep -q '"user"'; then
+        echo "Step 1/4: Authenticating with Microsoft Entra ID..."
+        echo "         A browser window will open for device code login."
+        echo ""
+        az login --use-device-code --allow-no-subscriptions
+        echo ""
+        echo "✅ Login successful."
+      else
+        echo "✅ Already authenticated to Azure."
+      fi
+
+      if [ -n "${SUBSCRIPTION_ID}" ]; then
+        echo ""
+        echo "Step 2/4: Setting subscription to ${SUBSCRIPTION_ID}..."
+        az account set --subscription "${SUBSCRIPTION_ID}"
+        echo "✅ Subscription set."
+      fi
+
+      echo ""
+      echo "Step 3/4: Fetching AKS credentials for '${AKS_CLUSTER_NAME}'..."
+      az aks get-credentials \
+        --resource-group "${RESOURCE_GROUP}" \
+        --name "${AKS_CLUSTER_NAME}" \
+        --overwrite-existing
+      echo "✅ AKS kubeconfig merged."
+
+      echo ""
+      echo "Step 4/4: Converting kubeconfig for Azure CLI authentication..."
+      kubelogin convert-kubeconfig -l azurecli
+      echo "✅ kubeconfig converted."
+
+      echo ""
+      echo "============================================================"
+      echo "  Verifying cluster access..."
+      echo "============================================================"
+      echo ""
+
+      kubectl cluster-info 2>/dev/null || echo ""
+
+      echo ""
+      echo "Testing node access with: kubectl get nodes"
+      if kubectl get nodes 2>/dev/null; then
+        echo ""
+        echo "✅ SUCCESS — You are authenticated as an AKS administrator."
+      else
+        echo ""
+        echo "⚠️  WARNING: Could not list nodes."
+      fi
+
+      echo ""
+      echo "============================================================"
+      echo "  Commands are now available:"
+      echo "    kubectl get nodes"
+      echo "    kubectl get pods -A"
+      echo "    kubectl get svc"
+      echo "    kubectl get ingress"
+      echo "============================================================"
+      LOGINEOF
+        chmod 0755 /opt/deploy/aks-admin-login.sh
+
+        log "Creating /opt/deploy/deploy.sh..."
+        cat > /opt/deploy/deploy.sh <<'DEPLOYEOF'
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      RESOURCE_GROUP="${1:?ERROR: Missing RESOURCE_GROUP argument}"
+      AKS_CLUSTER="${2:?ERROR: Missing AKS_CLUSTER argument}"
+      IMAGE_TAG="${3:?ERROR: Missing IMAGE_TAG argument}"
+      ACR_SERVER="${4:?ERROR: Missing ACR_SERVER argument}"
+      SUBSCRIPTION_ID="${5:?ERROR: Missing SUBSCRIPTION_ID argument}"
+      CHART_ARCHIVE="${6:?ERROR: Missing CHART_ARCHIVE argument}"
+
+      LOG_DIR="/opt/deploy/logs"
+      LOG_FILE="${LOG_DIR}/deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).log"
+      WORK_DIR="$(mktemp -d /tmp/ems-deploy.XXXXXX)"
+      CHART_DIR="${WORK_DIR}/deploy-pkg/employee-management-system"
+
+      log() {
+        local msg="[$(date --iso-8601=seconds)] $*"
+        echo "${msg}" | tee -a "${LOG_FILE}"
+      }
+
+      fail() {
+        log "ERROR: $*"
+        exit 1
+      }
+
+      on_error() {
+        local exit_code=$?
+        local line_no=$1
+        fail "Deployment failed at line ${line_no} with exit code ${exit_code}"
+      }
+
+      cleanup() {
+        rm -rf "${WORK_DIR}"
+      }
+
+      trap 'on_error $LINENO' ERR
+      trap cleanup EXIT
+
+      mkdir -p "${LOG_DIR}"
+
+      log "========================================="
+      log "Starting AKS Deployment"
+      log "========================================="
+      log "Resource Group:   ${RESOURCE_GROUP}"
+      log "AKS Cluster:      ${AKS_CLUSTER}"
+      log "Image Tag:        ${IMAGE_TAG}"
+      log "ACR Server:       ${ACR_SERVER}"
+      log "Subscription ID:  ${SUBSCRIPTION_ID}"
+      log "Chart Archive:    ${CHART_ARCHIVE}"
+      log "Log File:         ${LOG_FILE}"
+      log ""
+
+      if [ ! -f "${CHART_ARCHIVE}" ]; then
+          fail "Helm chart archive not found: ${CHART_ARCHIVE}"
+      fi
+
+      tar -xzf "${CHART_ARCHIVE}" -C "${WORK_DIR}"
+
+      if [ ! -d "${CHART_DIR}" ]; then
+          fail "Helm chart directory not found after extract: ${CHART_DIR}"
+      fi
+
+      log "Helm chart archive extracted successfully"
+
+      log "Step 1/4: Authenticating with system-assigned managed identity..."
+      if ! az login --identity >/dev/null 2>&1; then
+        fail "Failed to authenticate with managed identity"
+      fi
+      log "✅ Authenticated successfully"
+      log ""
+
+      log "Step 2/4: Setting subscription to ${SUBSCRIPTION_ID}..."
+      if ! az account set --subscription "${SUBSCRIPTION_ID}" >/dev/null 2>&1; then
+        fail "Failed to set subscription"
+      fi
+      log "✅ Subscription set"
+      log ""
+
+      log "Step 3/4: Obtaining AKS credentials..."
+      if ! az aks get-credentials \
+        --resource-group "${RESOURCE_GROUP}" \
+        --name "${AKS_CLUSTER}" \
+        --overwrite-existing >/dev/null 2>&1; then
+        fail "Failed to get AKS credentials"
+      fi
+      kubelogin convert-kubeconfig -l msi
+
+      log "✅ AKS credentials obtained"
+      log ""
+
+      log "Step 4/4: Deploying Helm chart..."
+      helm dependency build "${CHART_DIR}" 2>&1 | tee -a "${LOG_FILE}"
+
+      if ! helm upgrade --install employee-management \
+           "${CHART_DIR}" \
+           --namespace employee-management \
+           --create-namespace \
+           --wait \
+           --timeout 10m \
+           --set namespace="employee-management" \
+           --set registry.name="${ACR_SERVER}" \
+           --set backend.image.repository="ems-backend" \
+           --set backend.image.tag="${IMAGE_TAG}" \
+           --set frontend.image.repository="ems-frontend" \
+           --set frontend.image.tag="${IMAGE_TAG}" \
+           2>&1 | tee -a "${LOG_FILE}"; then
+           fail "Helm deployment failed"
+      fi
+      log "✅ Helm chart deployed successfully"
+      log ""
+
+      log "========================================="
+      log "✅ DEPLOYMENT COMPLETED SUCCESSFULLY"
+      log "========================================="
+
+      echo "DEPLOYMENT_STATUS=SUCCESS"
+      DEPLOYEOF
+        chmod 0755 /opt/deploy/deploy.sh
+
+        log "✅ Helper scripts created and configured"
+      }
+
+      validate_installation() {
+        log_section "Validating Installed Tools"
+        
+        local failed=0
+        
+        for tool in az kubectl helm kubelogin jq unzip git; do
+          if command -v "${tool}" >/dev/null; then
+            log "✅ ${tool} is installed"
+          else
+            log "❌ ${tool} is NOT installed"
+            failed=$((failed + 1))
+          fi
+        done
+
+        if [ "${failed}" -gt 0 ]; then
+          fail "${failed} required tool(s) are missing"
+        fi
+
+        log ""
+        log "Tool versions:"
+        az version -o json 2>/dev/null | jq '.'"'"'azure-cli'"'"' || true
+        kubectl version --client -o json 2>/dev/null | jq '.clientVersion.gitVersion' || true
+        helm version -o json 2>/dev/null | jq '.version' || true
+        kubelogin --version 2>&1 | head -1 || true
+
+        log "✅ All required tools are installed and functional"
+      }
+
+      create_bootstrap_marker() {
+        log_section "Creating Bootstrap Completion Marker"
+        
+        touch "${BOOTSTRAP_MARKER}"
+        log "✅ Marker file created: ${BOOTSTRAP_MARKER}"
+        log "   Timestamp: $(stat -c '%y' "${BOOTSTRAP_MARKER}" 2>/dev/null || echo 'unknown')"
+        
+        # Remove failed marker if it exists
+        rm -f "${BOOTSTRAP_FAILED_MARKER}"
+      }
+
+      main() {
+        log_section "AKS Jump VM Bootstrap"
+        log "Starting at: $(date --iso-8601=seconds)"
+        log "Kubectl Version: ${KUBECTL_VERSION}"
+        log "Kubelogin Version: ${KUBELOGIN_VERSION}"
+        log ""
+
+        # Check if already completed
+        if check_idempotency; then
+          log "✅ Bootstrap completed previously, skipping re-initialization"
+          exit 0
+        fi
+
+        check_system_preconditions
+        install_base_packages
+        install_azure_cli
+        install_kubectl
+        install_helm
+        install_kubelogin
+        configure_jumpvm_profile
+        validate_installation
+        create_bootstrap_marker
+
+        log_section "Bootstrap Completed Successfully"
+        log "Completed at: $(date --iso-8601=seconds)"
+        log ""
+        log "Jump VM is ready for AKS deployments"
+        log "Log file: ${BOOTSTRAP_LOG}"
+      }
+
+      main "$@"
+
+runcmd:
+  # Run bootstrap script with full output capture
+  - [bash, -lc, "/usr/local/sbin/bootstrap-jumpvm.sh"]
+
+final_message: "Jump VM initialization completed. Check /var/log/bootstrap-jumpvm.log for details."

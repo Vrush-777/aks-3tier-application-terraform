@@ -1,13 +1,31 @@
+#=============================================================================
+# Cloud-Init Configuration with Template Variable Substitution
+#
+# This configuration:
+# - Reads the enhanced cloud-init script (now with idempotency)
+# - Performs template variable substitution for tool versions
+# - Creates a stable hash for lifecycle-based VM replacement
+# - Ensures changes to cloud-init trigger VM recreation
+#=============================================================================
 locals {
+  # Read enhanced cloud-init script
+  jumpvm_cloud_init_raw = file("${path.module}/../../scripts/jumpvm-cloud-init-enhanced.yaml")
+
+  # Perform template substitutions
   jumpvm_cloud_init = replace(
     replace(
-      file("${path.module}/../../scripts/jumpvm-cloud-init.yaml"),
+      local.jumpvm_cloud_init_raw,
       "__KUBECTL_VERSION__",
       var.kubectl_version
     ),
     "__KUBELOGIN_VERSION__",
     var.kubelogin_version
   )
+
+  # Create hash of cloud-init content for lifecycle trigger
+  # This hash changes whenever cloud-init content changes,
+  # triggering VM replacement via the lifecycle rule below
+  jumpvm_cloud_init_hash = base64sha256(local.jumpvm_cloud_init)
 }
 
 resource "azurerm_public_ip" "jump_vm" {
@@ -71,14 +89,46 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
 
   tags = var.tags
 
+  #===========================================================================
+  # LIFECYCLE: Force VM Replacement When Cloud-Init Changes
+  #
+  # This lifecycle rule ensures that:
+  # 1. Any change to the cloud-init script content triggers VM replacement
+  # 2. The VM is destroyed and recreated (not just updated in-place)
+  # 3. This guarantees cloud-init runs on a fresh instance
+  #
+  # The replacement is triggered by changes to:
+  # - Tool versions (kubectl_version, kubelogin_version)
+  # - Any modification to jumpvm-cloud-init-enhanced.yaml
+  #
+  # Note: This will destroy existing VM data. Use data volumes if needed.
+  #===========================================================================
   lifecycle {
-    replace_triggered_by = [terraform_data.jumpvm_cloud_init]
+    replace_triggered_by = [
+      local.jumpvm_cloud_init_hash
+    ]
+    ignore_changes = [
+      os_disk.storage_account_type  # Allow Azure to optimize storage
+    ]
   }
 }
 
-resource "terraform_data" "jumpvm_cloud_init" {
-  input = sha256(local.jumpvm_cloud_init)
+
+#=============================================================================
+# Cloud-Init Status Tracking
+#
+# This data source tracks the bootstrap completion marker file on the Jump VM.
+# It's used to determine if cloud-init has completed successfully.
+#
+# Note: This is informational. The actual bootstrap status should be verified
+# by checking for /opt/deploy/.bootstrap-complete on the VM.
+#=============================================================================
+output "cloud_init_hash" {
+  value       = local.jumpvm_cloud_init_hash
+  description = "Hash of cloud-init content. Changes trigger VM replacement."
+  sensitive   = false
 }
+
 
 output "vm_id" {
   value = azurerm_linux_virtual_machine.jumpvm.id
