@@ -126,8 +126,7 @@ output "appgw_private_ip" {
 # ============================================================================
 
 output "aks_id" {
-  description = "ID of the AKS cluster"
-  value       = azurerm_kubernetes_cluster.aks.id
+  value = module.aks.aks_id
 }
 
 output "aks_cluster_name" {
