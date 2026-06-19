@@ -88,45 +88,6 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
   }
 
   tags = var.tags
-
-  #===========================================================================
-  # LIFECYCLE: Force VM Replacement When Cloud-Init Changes
-  #
-  # This lifecycle rule ensures that:
-  # 1. Any change to the cloud-init script content triggers VM replacement
-  # 2. The VM is destroyed and recreated (not just updated in-place)
-  # 3. This guarantees cloud-init runs on a fresh instance
-  #
-  # The replacement is triggered by changes to:
-  # - Tool versions (kubectl_version, kubelogin_version)
-  # - Any modification to jumpvm-cloud-init-enhanced.yaml
-  #
-  # Note: This will destroy existing VM data. Use data volumes if needed.
-  #===========================================================================
-  lifecycle {
-    replace_triggered_by = [
-      local.jumpvm_cloud_init_hash
-    ]
-    ignore_changes = [
-      os_disk.storage_account_type  # Allow Azure to optimize storage
-    ]
-  }
-}
-
-
-#=============================================================================
-# Cloud-Init Status Tracking
-#
-# This data source tracks the bootstrap completion marker file on the Jump VM.
-# It's used to determine if cloud-init has completed successfully.
-#
-# Note: This is informational. The actual bootstrap status should be verified
-# by checking for /opt/deploy/.bootstrap-complete on the VM.
-#=============================================================================
-output "cloud_init_hash" {
-  value       = local.jumpvm_cloud_init_hash
-  description = "Hash of cloud-init content. Changes trigger VM replacement."
-  sensitive   = false
 }
 
 
