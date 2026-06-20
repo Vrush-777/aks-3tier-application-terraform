@@ -617,20 +617,25 @@ write_files:
       log ""
 
       log "Step 3/4: Obtaining AKS credentials..."
+
       if ! az aks get-credentials \
         --resource-group "${RESOURCE_GROUP}" \
         --name "${AKS_CLUSTER}" \
         --overwrite-existing >/dev/null 2>&1; then
         fail "Failed to get AKS credentials"
       fi
-      kubelogin convert-kubeconfig -l azurecli
 
       export KUBECONFIG=/root/.kube/config
 
+      kubelogin convert-kubeconfig \
+        --kubeconfig "${KUBECONFIG}" \
+        -l msi
+
       log "Validating AKS connectivity..."
 
-      kubectl config current-context | tee -a "${LOG_FILE}"
-      kubectl get nodes | tee -a "${LOG_FILE}"
+      if ! kubectl get nodes >/dev/null 2>&1; then
+        fail "AKS connectivity validation failed"
+      fi
 
       log "✅ AKS credentials obtained"
       log ""
