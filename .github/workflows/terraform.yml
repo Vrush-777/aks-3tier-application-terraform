@@ -5,7 +5,6 @@ on:
     branches:
       - test
 
-
     paths:
       - 'terraform/**'
       - '.github/workflows/terraform.yml'
