@@ -23,7 +23,7 @@ output:
 
 write_files:
   # ============================================================================
-  # Bootstrap Script for AKS Jump VM Setup
+  # Bootstrap Script for AKS Jump VM Setup with Enhanced Logging and Idempotency
   # ============================================================================
   - path: /usr/local/sbin/bootstrap-jumpvm.sh
     owner: root:root
