@@ -75,7 +75,7 @@ jobs:
       # 
       # Purpose: Verify that cloud-init bootstrap script completed successfully
       # 
-      # Why This Marker?
+      # Why This Marker ?
       # - Created ONLY when bootstrap reaches 100% completion
       # - Indicates all tools are installed, all scripts are created
       # - More reliable than checking for individual files
