@@ -481,10 +481,6 @@ write_files:
       echo "Nodes:"
       kubectl get nodes || true
 
-      echo ""
-      echo "Kube Config:"
-      cat ~/.kube/config || true
-
       log "===== END DEBUG ====="
 
       log "✅ AKS credentials obtained"
@@ -534,31 +530,79 @@ write_files:
       echo "DEPLOYMENT_STATUS=SUCCESS"
       DEPLOYEOF
         chmod 0755 /opt/deploy/deploy.sh
+        if [ ! -x /opt/deploy/deploy.sh ]; then
+          fail "deploy.sh is not executable after chmod"
+        fi
+        log "✅ deploy.sh created, verified, and made executable"
       }
 
       validate_installation() {
-        log "Validating installed tools..."
-        command -v az >/dev/null || fail "az was not installed"
-        command -v kubectl >/dev/null || fail "kubectl was not installed"
-        command -v helm >/dev/null || fail "helm was not installed"
-        command -v kubelogin >/dev/null || fail "kubelogin was not installed"
-        command -v jq >/dev/null || fail "jq was not installed"
-        command -v unzip >/dev/null || fail "unzip was not installed"
-        command -v git >/dev/null || fail "git was not installed"
+        log "Validating installed tools and configuration..."
+        local validation_failed=0
+        
+        # Check /opt/deploy directory
+        if [ ! -d "/opt/deploy" ]; then
+          log "ERROR: /opt/deploy directory does not exist"
+          validation_failed=1
+        else
+          log "✅ /opt/deploy directory exists with proper structure"
+        fi
+        
+        if [ ! -d "/opt/deploy/logs" ]; then
+          log "ERROR: /opt/deploy/logs directory does not exist"
+          validation_failed=1
+        else
+          log "✅ /opt/deploy/logs directory exists"
+        fi
 
-        az version
-        kubectl version --client
-        helm version
-        kubelogin --version
-        jq --version
-        set +o pipefail
-        unzip -v | head -n 2
-        set -o pipefail
-        git --version
+        # Validate critical scripts exist and are executable
+        local critical_scripts=("deploy.sh" "aks-admin-login.sh" "get-kubeconfig.sh")
+        for script in "${critical_scripts[@]}"; do
+          local script_path="/opt/deploy/${script}"
+          if [ ! -f "${script_path}" ]; then
+            log "ERROR: ${script_path} does not exist"
+            validation_failed=1
+          elif [ ! -x "${script_path}" ]; then
+            log "ERROR: ${script_path} is not executable (permissions: $(stat -c '%a' "${script_path}"))"
+            validation_failed=1
+          else
+            # Verify it's a valid script (starts with shebang or contains valid shell)
+            if ! head -n 1 "${script_path}" | grep -qE '^#!' 2>/dev/null; then
+              log "WARNING: ${script_path} may not be a valid shell script (no shebang)"
+            fi
+            log "✅ ${script_path} exists and is executable"
+          fi
+        done
+
+        # Verify all required tools are installed
+        local tools=("az" "kubectl" "helm" "kubelogin" "jq" "unzip" "git")
+        for tool in "${tools[@]}"; do
+          if ! command -v "${tool}" >/dev/null 2>&1; then
+            log "ERROR: ${tool} is not installed or not in PATH"
+            validation_failed=1
+          else
+            log "✅ ${tool} is available"
+          fi
+        done
+
+        if [ ${validation_failed} -eq 1 ]; then
+          fail "Validation FAILED - One or more checks did not pass"
+        fi
+
+        log ""
+        log "Tool versions:"
+        az version 2>/dev/null | grep "azure-cli" || true
+        kubectl version --client --output=short 2>/dev/null || true
+        helm version --short 2>/dev/null || true
+        kubelogin --version 2>/dev/null || true
+        log "✅ All validations passed"
       }
 
       main() {
+        log "========================================="
         log "Starting Jump VM bootstrap for private AKS administration"
+        log "========================================="
+        log ""
         install_base_packages
         install_azure_cli
         install_kubectl
@@ -566,12 +610,34 @@ write_files:
         install_kubelogin
         configure_jumpvm_profile
         validate_installation
-        log "Jump VM bootstrap completed successfully"
+        
+        log ""
+        log "========================================="
+        log "✅ Jump VM bootstrap completed successfully"
+        log "========================================="
+        
+        # Create completion marker file for GitHub Actions to detect
+        mkdir -p /opt/deploy
+        touch /opt/deploy/.bootstrap-complete
+        log "Status marker created: /opt/deploy/.bootstrap-complete"
+        log ""
+        log "Next steps:"
+        log "  1. SSH to Jump VM"
+        log "  2. Run: /opt/deploy/aks-admin-login.sh <resource-group> <cluster-name>"
+        log "  3. Verify: kubectl get nodes"
       }
 
       main "$@"
 
 runcmd:
   - [bash, -lc, "/usr/local/sbin/bootstrap-jumpvm.sh"]
+  # Poll for bootstrap completion marker (timeout after 120 seconds)
+  - [bash, -c, "echo 'Waiting for cloud-init bootstrap to complete...'; for i in {1..120}; do [ -f /opt/deploy/.bootstrap-complete ] && { echo 'Bootstrap completed successfully'; exit 0; }; [ $(( i % 10 )) -eq 0 ] && echo \"Waiting... (${i}s)\"; sleep 1; done; echo 'ERROR: Bootstrap completion marker not found' >&2; exit 1"]
+  # Verify deployment script exists and is executable
+  - [bash, -c, "[ -f /opt/deploy/deploy.sh ] || { echo 'ERROR: /opt/deploy/deploy.sh not found' >&2; exit 1; }; [ -x /opt/deploy/deploy.sh ] || { echo 'ERROR: /opt/deploy/deploy.sh is not executable' >&2; exit 1; }; echo 'SUCCESS: /opt/deploy/deploy.sh verified'"]
+  # List deployment directory for verification
+  - [bash, -c, "echo '=== /opt/deploy directory contents ==='; ls -lhR /opt/deploy/ || echo 'Directory listing failed'"]
+  # Verify file types and shell syntax
+  - [bash, -c, "echo '=== Verifying deploy.sh file type ==='; file /opt/deploy/deploy.sh; echo '=== Checking for shell syntax errors ==='; bash -n /opt/deploy/deploy.sh && echo 'deploy.sh: Shell syntax OK' || echo 'deploy.sh: Syntax errors found'"]
 
 final_message: "Jump VM initialization completed. AKS tooling bootstrap succeeded."
