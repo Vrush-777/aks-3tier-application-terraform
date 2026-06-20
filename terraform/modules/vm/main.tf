@@ -49,6 +49,10 @@ locals {
   jumpvm_cloud_init_version = "enhanced-v2.0-terraform-lifecycle"
 }
 
+resource "terraform_data" "cloud_init_trigger" {
+  input = local.jumpvm_cloud_init_hash
+}
+
 resource "azurerm_public_ip" "jump_vm" {
   name                = "${var.prefix}-jumpvm-pip"
   resource_group_name = var.resource_group_name
@@ -104,6 +108,12 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
   # CRITICAL: Base64 encode the cloud-init script
   # Azure automatically decodes this and passes to cloud-init
   custom_data = base64encode(local.jumpvm_cloud_init)
+
+  lifecycle {
+  replace_triggered_by = [
+    terraform_data.cloud_init_trigger
+  ]
+}
 
   # System Assigned Managed Identity for authentication to Azure services
   # This allows the Jump VM to authenticate using 'az login --identity'
