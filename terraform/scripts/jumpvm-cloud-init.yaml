@@ -450,7 +450,7 @@ write_files:
         --overwrite-existing >/dev/null 2>&1; then
         fail "Failed to get AKS credentials"
       fi
-      kubelogin convert-kubeconfig -l msi
+      kubelogin convert-kubeconfig -l azurecli
 
       log "===== AKS CONNECTIVITY DEBUG ====="
 
@@ -505,6 +505,7 @@ write_files:
       if ! helm upgrade --install employee-management \
            "${CHART_DIR}" \
            --namespace employee-management \
+           --kubeconfig /root/.kube/config \
            --create-namespace \
            --wait \
            --timeout 10m \

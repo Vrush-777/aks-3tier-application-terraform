@@ -623,10 +623,21 @@ write_files:
         --overwrite-existing >/dev/null 2>&1; then
         fail "Failed to get AKS credentials"
       fi
-      kubelogin convert-kubeconfig -l msi
+      kubelogin convert-kubeconfig -l azurecli
+
+      export KUBECONFIG=/root/.kube/config
+
+      log "Validating AKS connectivity..."
+
+      kubectl config current-context | tee -a "${LOG_FILE}"
+      kubectl get nodes | tee -a "${LOG_FILE}"
 
       log "✅ AKS credentials obtained"
       log ""
+
+      if ! kubectl get nodes >/dev/null 2>&1; then
+          fail "AKS connectivity validation failed"
+      fi
 
       log "Step 4/4: Deploying Helm chart..."
       helm dependency build "${CHART_DIR}" 2>&1 | tee -a "${LOG_FILE}"
@@ -634,6 +645,7 @@ write_files:
       if ! helm upgrade --install employee-management \
            "${CHART_DIR}" \
            --namespace employee-management \
+           --kubeconfig /root/.kube/config \
            --create-namespace \
            --wait \
            --timeout 10m \
