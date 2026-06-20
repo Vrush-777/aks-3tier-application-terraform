@@ -269,7 +269,7 @@ write_files:
         distro="$(lsb_release -cs)"
         log "Configuring Azure CLI APT repository (${distro})..."
         
-        cat > /etc/apt/sources.list.d/azure-cli.sources <<EOF
+      cat > /etc/apt/sources.list.d/azure-cli.sources <<EOF
       Types: deb
       URIs: https://packages.microsoft.com/repos/azure-cli/
       Suites: ${distro}
@@ -360,7 +360,7 @@ write_files:
         gpg --dearmor < /tmp/helm.gpgkey > /etc/apt/keyrings/helm.gpg
         chmod 0644 /etc/apt/keyrings/helm.gpg
 
-        cat > /etc/apt/sources.list.d/helm-stable-debian.sources <<EOF
+      cat > /etc/apt/sources.list.d/helm-stable-debian.sources <<EOF
       Types: deb
       URIs: https://packages.buildkite.com/helm-linux/helm-debian/any/
       Suites: any
@@ -435,7 +435,7 @@ write_files:
         mkdir -p /opt/deploy/logs
 
         log "Creating /etc/profile.d/aks-tools.sh..."
-        cat > /etc/profile.d/aks-tools.sh <<'EOF'
+      cat > /etc/profile.d/aks-tools.sh <<'EOF'
       export PATH="/opt/deploy:/usr/local/bin:$PATH"
       alias k='kubectl'
       alias h='helm'
@@ -537,7 +537,7 @@ write_files:
         chmod 0755 /opt/deploy/aks-admin-login.sh
 
         log "Creating /opt/deploy/deploy.sh..."
-        cat > /opt/deploy/deploy.sh <<'DEPLOYEOF'
+      cat > /opt/deploy/deploy.sh <<'DEPLOYEOF'
       #!/usr/bin/env bash
       set -Eeuo pipefail
 
@@ -680,10 +680,9 @@ write_files:
 
         log ""
         log "Tool versions:"
-        az version -o json 2>/dev/null | jq '.'"'"'azure-cli'"'"' || true
-        kubectl version --client -o json 2>/dev/null | jq '.clientVersion.gitVersion' || true
-        helm version -o json 2>/dev/null | jq '.version' || true
-        kubelogin --version 2>&1 | head -1 || true
+        az version -o json 2>/dev/null | jq -r '."azure-cli"' || true
+        kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' || true
+        helm version -o json 2>/dev/null | jq -r '.version' || true
 
         log "✅ All required tools are installed and functional"
       }
