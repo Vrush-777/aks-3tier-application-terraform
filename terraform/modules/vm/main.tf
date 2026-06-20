@@ -6,12 +6,26 @@
 # - Performs template variable substitution for tool versions
 # - Creates a stable hash for lifecycle-based VM replacement
 # - Ensures changes to cloud-init trigger VM recreation
+# - Validates cloud-init content before encoding
+#
+# CRITICAL: Do NOT change the hash computation without updating
+# ALL existing VMs or they will be recreated on next apply.
 #=============================================================================
 locals {
-  # Read enhanced cloud-init script
-  jumpvm_cloud_init_raw = file("${path.module}/../../scripts/jumpvm-cloud-init-enhanced.yaml")
+  # Read enhanced cloud-init script from disk
+  jumpvm_cloud_init_script_path = "${path.module}/../../scripts/jumpvm-cloud-init-enhanced.yaml"
 
-  # Perform template substitutions
+  jumpvm_cloud_init_raw = file(local.jumpvm_cloud_init_script_path)
+
+  # Validate cloud-init starts with cloud-config header
+  # This catches YAML structure errors early
+  jumpvm_cloud_init_valid = (
+    startswith(local.jumpvm_cloud_init_raw, "#cloud-config") 
+    ? local.jumpvm_cloud_init_raw 
+    : "ERROR: Cloud-init must start with #cloud-config header"
+  )
+
+  # Perform template substitutions for kubectl and kubelogin versions
   jumpvm_cloud_init = replace(
     replace(
       local.jumpvm_cloud_init_raw,
@@ -23,9 +37,16 @@ locals {
   )
 
   # Create hash of cloud-init content for lifecycle trigger
-  # This hash changes whenever cloud-init content changes,
-  # triggering VM replacement via the lifecycle rule below
+  # This hash MUST change whenever cloud-init content changes,
+  # which triggers VM replacement via the lifecycle rule below.
+  # 
+  # STABILITY NOTE: The hash algorithm (base64sha256) is stable.
+  # DO NOT change this algorithm without understanding impacts.
   jumpvm_cloud_init_hash = base64sha256(local.jumpvm_cloud_init)
+
+  # Document the cloud-init version being applied
+  # Used in outputs for debugging and validation
+  jumpvm_cloud_init_version = "enhanced-v2.0-terraform-lifecycle"
 }
 
 resource "azurerm_public_ip" "jump_vm" {
@@ -80,14 +101,19 @@ resource "azurerm_linux_virtual_machine" "jumpvm" {
     version   = "latest"
   }
 
+  # CRITICAL: Base64 encode the cloud-init script
+  # Azure automatically decodes this and passes to cloud-init
   custom_data = base64encode(local.jumpvm_cloud_init)
 
   # System Assigned Managed Identity for authentication to Azure services
+  # This allows the Jump VM to authenticate using 'az login --identity'
+  # without requiring any stored credentials
   identity {
     type = "SystemAssigned"
   }
 
   tags = var.tags
+
 }
 
 

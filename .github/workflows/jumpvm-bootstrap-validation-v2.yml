@@ -1,0 +1,455 @@
+name: Enhanced Bootstrap Validation & Deployment (v2 - Marker-Based)
+
+# Production-Grade Bootstrap Validation Workflow
+#
+# Changes from v1:
+# ✅ Check for .bootstrap-complete marker (sign of SUCCESS)
+# ✅ Collect comprehensive diagnostics on FAILURE
+# ✅ Validate cloud-init logs for troubleshooting
+# ✅ Verify bootstrap marker + tools before deployment
+# ✅ Clear error messages for troubleshooting
+#
+# Key Improvement: Instead of waiting for deploy.sh (timeout-prone),
+# wait for .bootstrap-complete marker which indicates SUCCESS.
+
+on:
+  workflow_run:
+    workflows:
+      - Terraform Infrastructure Pipeline
+    types:
+      - completed
+
+  workflow_dispatch:
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.TF_VAR_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.TF_VAR_TENANT_ID }}
+  ACR_NAME: ${{ secrets.TF_VAR_ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ secrets.TF_VAR_ACR_NAME }}.azurecr.io
+  AKS_CLUSTER_NAME: ${{ secrets.TF_VAR_AKS_CLUSTER_NAME }}
+  RESOURCE_GROUP: ${{ secrets.TF_VAR_RESOURCE_GROUP_NAME }}
+  HELM_CHART_PATH: ./helm/employee-management-system
+  DEPLOYMENT_NAMESPACE: employee-management
+
+jobs:
+  # =========================================================================
+  # Production-Grade Bootstrap Validation Job
+  # =========================================================================
+  validate-bootstrap:
+    name: Validate Jump VM Bootstrap Completion
+    runs-on: ubuntu-latest
+
+    outputs:
+      bootstrap_complete: ${{ steps.check-marker.outputs.complete }}
+      kubectl_available: ${{ steps.check-tools.outputs.kubectl }}
+      helm_available: ${{ steps.check-tools.outputs.helm }}
+      kubelogin_available: ${{ steps.check-tools.outputs.kubelogin }}
+      azure_cli_available: ${{ steps.check-tools.outputs.az }}
+      vm_ready: ${{ steps.final-check.outputs.ready }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Retrieve Terraform Outputs
+        id: terraform-outputs
+        run: |
+          JUMP_VM_NAME="${{ secrets.JUMP_VM_NAME }}"
+          
+          if [ -z "$JUMP_VM_NAME" ]; then
+            echo "ERROR: JUMP_VM_NAME secret not configured"
+            exit 1
+          fi
+          
+          echo "jump_vm_name=${JUMP_VM_NAME}" >> $GITHUB_OUTPUT
+          echo "resource_group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+
+      # =====================================================================
+      # STAGE 1: Check Bootstrap Completion Marker (.bootstrap-complete)
+      # =====================================================================
+      # 
+      # Purpose: Verify that cloud-init bootstrap script completed successfully
+      # 
+      # Why This Marker?
+      # - Created ONLY when bootstrap reaches 100% completion
+      # - Indicates all tools are installed, all scripts are created
+      # - More reliable than checking for individual files
+      # - Prevents "false positive" where partial bootstrap leaves some files
+      #
+      # Polling Strategy:
+      # - Timeout: 10 minutes (generous for Azure VM startup + cloud-init execution)
+      # - Poll Interval: 30 seconds (reduces API calls while staying responsive)
+      #
+      - name: "Stage 1: Check Bootstrap Completion Marker"
+        id: check-marker
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set +e  # Don't fail on first error; collect diagnostics
+            
+            JUMP_VM_NAME="${{ steps.terraform-outputs.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform-outputs.outputs.resource_group }}"
+            
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  Stage 1: Checking Bootstrap Completion Marker                 ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "Jump VM:       ${JUMP_VM_NAME}"
+            echo "Resource Grp:  ${RESOURCE_GROUP}"
+            echo "Marker Path:   /opt/deploy/.bootstrap-complete"
+            echo ""
+            
+            # Poll for bootstrap completion marker
+            TIMEOUT=600  # 10 minutes
+            ELAPSED=0
+            POLL_INTERVAL=30
+            POLL_COUNT=0
+            
+            while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+              POLL_COUNT=$((POLL_COUNT + 1))
+              echo "[$(date +'%Y-%m-%d %H:%M:%S')] Poll #${POLL_COUNT}: Checking for bootstrap marker..."
+              
+              RESULT=$(az vm run-command invoke \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${JUMP_VM_NAME}" \
+                --command-id RunShellScript \
+                --scripts "
+                if [ -f /opt/deploy/.bootstrap-complete ]; then
+                  echo 'STATUS=COMPLETE'
+                  echo 'MARKER_TIME='\"$(stat -c '%y' /opt/deploy/.bootstrap-complete 2>/dev/null || echo 'unknown')\"
+                  echo 'MARKER_CONTENT='\"$(cat /opt/deploy/.bootstrap-complete 2>/dev/null || echo 'marker-exists')\"
+                elif [ -f /opt/deploy/.bootstrap-failed ]; then
+                  echo 'STATUS=FAILED'
+                  echo 'MARKER_TIME='\"$(stat -c '%y' /opt/deploy/.bootstrap-failed 2>/dev/null)\"
+                else
+                  echo 'STATUS=IN_PROGRESS'
+                fi
+                " \
+                --query 'value[0].message' \
+                --output tsv 2>&1)
+              
+              # Parse response
+              STATUS=$(echo "${RESULT}" | grep "^STATUS=" | cut -d= -f2)
+              
+              case "${STATUS}" in
+                COMPLETE)
+                  echo "✅ Bootstrap marker found!"
+                  echo "${RESULT}"
+                  echo ""
+                  echo "complete=true" >> $GITHUB_OUTPUT
+                  exit 0
+                  ;;
+                FAILED)
+                  echo "❌ Bootstrap failed marker detected!"
+                  echo "${RESULT}"
+                  echo ""
+                  echo "complete=false" >> $GITHUB_OUTPUT
+                  exit 1
+                  ;;
+                IN_PROGRESS)
+                  REMAINING=$((TIMEOUT - ELAPSED))
+                  echo "⏳ Bootstrap in progress... (${REMAINING}s remaining)"
+                  sleep ${POLL_INTERVAL}
+                  ELAPSED=$((ELAPSED + POLL_INTERVAL))
+                  ;;
+                *)
+                  echo "⚠️  Unknown status. Raw response:"
+                  echo "${RESULT}"
+                  sleep ${POLL_INTERVAL}
+                  ELAPSED=$((ELAPSED + POLL_INTERVAL))
+                  ;;
+              esac
+            done
+            
+            echo ""
+            echo "❌ TIMEOUT: Bootstrap marker not found after ${TIMEOUT} seconds"
+            echo "complete=false" >> $GITHUB_OUTPUT
+            exit 1
+
+      # =====================================================================
+      # STAGE 2: Verify Tool Installation
+      # =====================================================================
+      - name: "Stage 2: Verify Tool Installation"
+        id: check-tools
+        uses: azure/CLI@v1
+        if: steps.check-marker.outputs.complete == 'true'
+        with:
+          inlineScript: |
+            set +e
+            
+            JUMP_VM_NAME="${{ steps.terraform-outputs.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform-outputs.outputs.resource_group }}"
+            
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  Stage 2: Verifying Tool Installation                          ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            
+            # Check each tool
+            TOOLS="kubectl helm kubelogin az jq git unzip"
+            MISSING=0
+            
+            for TOOL in $TOOLS; do
+              RESULT=$(az vm run-command invoke \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${JUMP_VM_NAME}" \
+                --command-id RunShellScript \
+                --scripts "
+                if command -v ${TOOL} &>/dev/null; then
+                  echo 'TOOL_FOUND=true'
+                  ${TOOL} --version 2>&1 | head -1
+                else
+                  echo 'TOOL_FOUND=false'
+                fi
+                " \
+                --query 'value[0].message' \
+                --output tsv)
+              
+              if echo "${RESULT}" | grep -q "TOOL_FOUND=true"; then
+                echo "  ✅ ${TOOL}"
+                echo "     $(echo "${RESULT}" | grep -v "TOOL_FOUND" | head -1)"
+                echo "${TOOL}=available" >> $GITHUB_OUTPUT
+              else
+                echo "  ❌ ${TOOL} - NOT FOUND"
+                echo "${TOOL}=missing" >> $GITHUB_OUTPUT
+                MISSING=$((MISSING + 1))
+              fi
+            done
+            
+            echo ""
+            if [ ${MISSING} -gt 0 ]; then
+              echo "⚠️  ${MISSING} tool(s) missing - Bootstrap may be incomplete"
+              exit 1
+            else
+              echo "✅ All required tools are available"
+            fi
+
+      # =====================================================================
+      # STAGE 3: Verify deploy.sh Script Exists
+      # =====================================================================
+      - name: "Stage 3: Verify deploy.sh Script Exists"
+        id: check-deploy-script
+        uses: azure/CLI@v1
+        if: steps.check-marker.outputs.complete == 'true'
+        with:
+          inlineScript: |
+            set +e
+            
+            JUMP_VM_NAME="${{ steps.terraform-outputs.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform-outputs.outputs.resource_group }}"
+            
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  Stage 3: Verifying deploy.sh Script                           ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            
+            RESULT=$(az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "
+              if [ -f /opt/deploy/deploy.sh ]; then
+                echo 'DEPLOY_EXISTS=true'
+                if [ -x /opt/deploy/deploy.sh ]; then
+                  echo 'DEPLOY_EXECUTABLE=true'
+                else
+                  echo 'DEPLOY_EXECUTABLE=false'
+                fi
+                ls -lh /opt/deploy/deploy.sh
+                echo 'SCRIPT_SIZE='\"$(wc -l < /opt/deploy/deploy.sh)\" lines
+              else
+                echo 'DEPLOY_EXISTS=false'
+                echo 'DEPLOY_DIR_CONTENTS:'
+                ls -lah /opt/deploy/ 2>/dev/null || echo 'Cannot list /opt/deploy'
+              fi
+              " \
+              --query 'value[0].message' \
+              --output tsv)
+            
+            echo "${RESULT}"
+            echo ""
+            
+            if echo "${RESULT}" | grep -q "DEPLOY_EXISTS=true"; then
+              echo "✅ deploy.sh exists"
+              if echo "${RESULT}" | grep -q "DEPLOY_EXECUTABLE=true"; then
+                echo "✅ deploy.sh is executable"
+              else
+                echo "⚠️  deploy.sh is not executable - fixing permissions..."
+                az vm run-command invoke \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${JUMP_VM_NAME}" \
+                  --command-id RunShellScript \
+                  --scripts "chmod 755 /opt/deploy/deploy.sh" >/dev/null
+                echo "✅ Permissions fixed"
+              fi
+            else
+              echo "❌ deploy.sh not found - bootstrap may have failed"
+              exit 1
+            fi
+
+      # =====================================================================
+      # STAGE 4: Final Readiness Check
+      # =====================================================================
+      - name: "Stage 4: Final Readiness Check"
+        id: final-check
+        uses: azure/CLI@v1
+        if: steps.check-marker.outputs.complete == 'true'
+        with:
+          inlineScript: |
+            JUMP_VM_NAME="${{ steps.terraform-outputs.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform-outputs.outputs.resource_group }}"
+            
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  Stage 4: Final Readiness Check                                ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            
+            RESULT=$(az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "
+              echo '=== Bootstrap Status ==='
+              [ -f /opt/deploy/.bootstrap-complete ] && echo '✅ Complete' || echo '❌ Not complete'
+              echo ''
+              
+              echo '=== Directory Structure ==='
+              ls -lh /opt/deploy/ 2>/dev/null || echo 'Error: /opt/deploy not found'
+              echo ''
+              
+              echo '=== Tool Paths ==='
+              for tool in kubectl helm kubelogin az jq git unzip; do
+                PATH_INFO=\$(command -v \$tool 2>/dev/null || echo 'NOT FOUND')
+                echo \"  \${tool}: \${PATH_INFO}\"
+              done
+              echo ''
+              
+              echo '=== System Resources ==='
+              echo \"Disk: \$(df /opt | tail -1 | awk '{printf \"%dGB available\", \$4/1024/1024}')\"
+              echo \"Memory: \$(free -h | grep Mem | awk '{print \$2 \" total, \" \$7 \" available}')\"
+              " \
+              --query 'value[0].message' \
+              --output tsv)
+            
+            echo "${RESULT}"
+            echo ""
+            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "✅ Jump VM is ready for deployment"
+
+      # =====================================================================
+      # STAGE 5: Retrieve Bootstrap Logs (on ANY failure)
+      # =====================================================================
+      - name: "Stage 5: Retrieve Bootstrap Diagnostics (on failure)"
+        id: retrieve-logs
+        uses: azure/CLI@v1
+        if: failure()
+        with:
+          inlineScript: |
+            set +e
+            
+            JUMP_VM_NAME="${{ steps.terraform-outputs.outputs.jump_vm_name }}"
+            RESOURCE_GROUP="${{ steps.terraform-outputs.outputs.resource_group }}"
+            
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║  Stage 5: Retrieving Bootstrap Diagnostics                     ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            
+            # Retrieve bootstrap log
+            echo "───── Bootstrap Log (last 100 lines) ─────"
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "tail -100 /var/log/bootstrap-jumpvm.log 2>/dev/null || echo 'Log not found'" \
+              --query 'value[0].message' \
+              --output tsv
+            
+            echo ""
+            echo "───── Cloud-Init Log (last 50 lines) ─────"
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "tail -50 /var/log/cloud-init-output.log 2>/dev/null || echo 'Log not found'" \
+              --query 'value[0].message' \
+              --output tsv
+            
+            echo ""
+            echo "───── Bootstrap Diagnostics ─────"
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "
+              if [ -f /opt/deploy/.bootstrap-diagnostics ]; then
+                cat /opt/deploy/.bootstrap-diagnostics
+              else
+                echo 'No diagnostics file found'
+              fi
+              " \
+              --query 'value[0].message' \
+              --output tsv
+            
+            echo ""
+            echo "───── System Status ─────"
+            az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "
+              echo 'Cloud-Init Status:'
+              cloud-init status || echo 'cloud-init status unavailable'
+              echo ''
+              echo 'Directory Structure:'
+              find /opt/deploy -type f 2>/dev/null || echo 'Cannot list /opt/deploy'
+              echo ''
+              echo 'System Resources:'
+              free -h
+              df -h
+              " \
+              --query 'value[0].message' \
+              --output tsv
+            
+            echo ""
+            echo "⚠️  Bootstrap validation failed - see logs above for diagnostics"
+
+  # =========================================================================
+  # Summary Job
+  # =========================================================================
+  bootstrap-summary:
+    name: Bootstrap Validation Summary
+    runs-on: ubuntu-latest
+    needs: validate-bootstrap
+    if: always()
+
+    steps:
+      - name: Print Summary
+        run: |
+          echo "╔════════════════════════════════════════════════════════════════╗"
+          echo "║  Bootstrap Validation Summary                                  ║"
+          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "Bootstrap Status:  ${{ needs.validate-bootstrap.outputs.bootstrap_complete }}"
+          echo "VM Ready:          ${{ needs.validate-bootstrap.outputs.vm_ready }}"
+          echo ""
+          echo "Tool Status:"
+          echo "  - kubectl:    ${{ needs.validate-bootstrap.outputs.kubectl_available }}"
+          echo "  - helm:       ${{ needs.validate-bootstrap.outputs.helm_available }}"
+          echo "  - kubelogin:  ${{ needs.validate-bootstrap.outputs.kubelogin_available }}"
+          echo "  - azure-cli:  ${{ needs.validate-bootstrap.outputs.azure_cli_available }}"
+          echo ""
+          
+          if [ "${{ needs.validate-bootstrap.result }}" = "success" ]; then
+            echo "✅ Jump VM bootstrap validation PASSED"
+            echo "🚀 Ready for AKS deployment"
+          else
+            echo "❌ Jump VM bootstrap validation FAILED"
+            echo "📋 Check logs above for diagnostics"
+            exit 1
+          fi
