@@ -18,7 +18,7 @@
 resource "azurerm_role_assignment" "jumpvm_aks_rbac_admin" {
   count                = var.enable_managed_identity ? 1 : 0
 
-  scope                = var.aks_cluster_id
+  scope                = var.aksd_cluster_id
   role_definition_name = "Azure Kubernetes Service RBAC Cluster Admin"
 
   principal_id = azurerm_linux_virtual_machine.jumpvm.identity[0].principal_id

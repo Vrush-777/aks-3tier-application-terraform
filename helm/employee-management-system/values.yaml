@@ -148,7 +148,7 @@ postgresql:
   enabled: true
   auth:
     username: employee_user
-    password: "ChangeMe123!"  # Override in values-*.yaml files
+    password: ""  # Override in values-*.yaml files
     database: employee_db
     existingSecret: ""
 
