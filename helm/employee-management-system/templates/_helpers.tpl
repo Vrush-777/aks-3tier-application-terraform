@@ -33,13 +33,14 @@ Common labels
 */}}
 {{- define "employee-management-system.labels" -}}
 helm.sh/chart: {{ include "employee-management-system.chart" . }}
-{{ include "employee-management-system.selectorLabels" . }}
+app.kubernetes.io/name: {{ include "employee-management-system.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- with .Values.commonLabels }}
-{{ toYaml . }}
+{{ toYaml . | nindent 0 }}
 {{- end }}
 {{- end }}
 
