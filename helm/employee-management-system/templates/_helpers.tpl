@@ -56,9 +56,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Secret name for PostgreSQL credentials
 */}}
 {{- define "employee-management-system.secretName" -}}
-{{- if .Values.postgresql.auth.existingSecret }}
-{{- .Values.postgresql.auth.existingSecret }}
-{{- else }}
-{{ include "employee-management-system.fullname" . }}-secret
-{{- end }}
-{{- end }}
+{{- if .Values.postgresql.auth.existingSecret -}}
+{{- .Values.postgresql.auth.existingSecret -}}
+{{- else -}}
+{{- printf "%s-secret" (include "employee-management-system.fullname" .) -}}
+{{- end -}}
+{{- end -}}
