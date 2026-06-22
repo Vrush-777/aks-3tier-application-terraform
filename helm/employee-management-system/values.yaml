@@ -146,9 +146,15 @@ backend:
 # PostgreSQL Configuration
 postgresql:
   enabled: true
+
+  image:
+    registry: docker.io
+    repository: bitnami/postgresql
+    tag: "16.4.0-debian-12-r7"
+
   auth:
     username: employee_user
-    password: ""  # Override in values-*.yaml files
+    password: "" # Override in values-*.yaml files
     database: employee_db
     existingSecret: ""
 
@@ -168,6 +174,10 @@ postgresql:
 
   metrics:
     enabled: true
+    image:
+      registry: docker.io
+      repository: bitnami/postgres-exporter
+      tag: "0.15.0-debian-12-r9"
 
 # Network Policy
 networkPolicy:
