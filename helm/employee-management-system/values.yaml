@@ -150,11 +150,11 @@ postgresql:
   image:
     registry: docker.io
     repository: bitnami/postgresql
-    tag: "16.4.0-debian-12-r7"
+    tag: "16.0.0-debian-12-r12"
 
   auth:
     username: employee_user
-    password: "" # Override in values-*.yaml files
+    password: ""
     database: employee_db
     existingSecret: ""
 
@@ -173,11 +173,7 @@ postgresql:
         memory: 512Mi
 
   metrics:
-    enabled: true
-    image:
-      registry: docker.io
-      repository: bitnami/postgres-exporter
-      tag: "0.15.0-debian-12-r9"
+    enabled: false
 
 # Network Policy
 networkPolicy:
