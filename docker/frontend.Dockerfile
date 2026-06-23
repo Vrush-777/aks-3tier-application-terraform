@@ -49,10 +49,10 @@ RUN chown -R nginx-user:www-user /usr/share/nginx/html && \
     chown -R nginx-user:www-user /var/run/nginx.pid
 
 # Switch to non-root user
-USER nginx-user
+# USER nginx-user
 
 # Expose standard HTTP port
-EXPOSE 8080
+EXPOSE 80
 
 # Health check for container orchestration
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
