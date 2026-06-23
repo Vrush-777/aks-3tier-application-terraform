@@ -124,15 +124,17 @@ backend:
   tolerations: []
 
   # Spring Boot Application Configuration
-  config:
-    spring:
-      jpa:
-        hibernate:
-          ddl-auto: update
-        properties:
+  backend:
+    config:
+      spring:
+        jpa:
+          hibernate:
+            ddl-auto: update
+
+          properties:
             hibernate:
-            jdbc:
-              batch_size: 20
+              jdbc:
+                batch_size: 20
             order_inserts: true
             order_updates: true
       datasource:
