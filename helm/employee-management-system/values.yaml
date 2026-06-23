@@ -147,11 +147,6 @@ backend:
 postgresql:
   enabled: true
 
-  image:
-    registry: docker.io
-    repository: bitnami/postgresql
-    tag: "16.0.0-debian-12-r12"
-
   auth:
     username: employee_user
     password: ""
