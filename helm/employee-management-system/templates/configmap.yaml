@@ -24,7 +24,7 @@ data:
         show-sql: false
 
         hibernate:
-          ddl-auto: {{ index .Values.backend.config.spring.jpa.hibernate "ddl-auto" | default "update" }}
+          ddl-auto: update
           naming:
             physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
 
@@ -42,18 +42,18 @@ data:
           connection-timeout: 30000
           idle-timeout: 600000
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics
 
-  endpoint:
-    health:
-      probes:
-        enabled: true
+      endpoint:
+        health:
+          probes:
+            enabled: true
 
-logging:
-  level:
-    root: INFO
+    logging:
+      level:
+        root: INFO
 {{- end }}

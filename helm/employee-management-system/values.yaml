@@ -123,26 +123,26 @@ backend:
   affinity: {}
   tolerations: []
 
-  # Spring Boot Application Configuration
-  backend:
-    config:
-      spring:
-        jpa:
-          hibernate:
-            ddl-auto: update
+  # # Spring Boot Application Configuration
+  # backend:
+  #   config:
+  #     spring:
+  #       jpa:
+  #         hibernate:
+  #           ddl-auto: update
 
-          properties:
-            hibernate:
-              jdbc:
-                batch_size: 20
-            order_inserts: true
-            order_updates: true
-      datasource:
-        hikari:
-          maximum-pool-size: 20
-          minimum-idle: 5
-          connection-timeout: 30000
-          idle-timeout: 600000
+  #         properties:
+  #           hibernate:
+  #             jdbc:
+  #               batch_size: 20
+  #           order_inserts: true
+  #           order_updates: true
+  #     datasource:
+  #       hikari:
+  #         maximum-pool-size: 20
+  #         minimum-idle: 5
+  #         connection-timeout: 30000
+  #         idle-timeout: 600000
 
 # PostgreSQL Configuration
 postgresql:
