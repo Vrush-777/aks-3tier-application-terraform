@@ -37,9 +37,6 @@ spec:
         - name: http
           containerPort: 8080
           protocol: TCP
-        - name: actuator
-          containerPort: 8081
-          protocol: TCP
         env:
         - name: SPRING_PROFILES_ACTIVE
           value: "{{ .Values.global.environment }}"
@@ -60,18 +57,18 @@ spec:
 
         livenessProbe:
           httpGet:
-            path: /actuator/health/liveness
-            port: actuator
-          initialDelaySeconds: 60
+            path: /actuator/health
+            port: http
+          initialDelaySeconds: 90
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
 
         readinessProbe:
           httpGet:
-            path: /actuator/health/readiness
-            port: actuator
-          initialDelaySeconds: 30
+            path: /actuator/health
+            port: http
+          initialDelaySeconds: 60
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
