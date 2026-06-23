@@ -46,12 +46,16 @@ spec:
         - name: SPRING_DATASOURCE_URL
           value: "jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
         - name: SPRING_DATASOURCE_USERNAME
-          value: "{{ .Values.postgresql.auth.username }}"
+          valueFrom:
+          secretKeyRef:
+          name: {{ .Release.Name }}-postgresql
+          key: username
+
         - name: SPRING_DATASOURCE_PASSWORD
           valueFrom:
-            secretKeyRef:
-              name: {{ include "employee-management-system.secretName" . | quote }}
-              key: postgres-password
+          secretKeyRef:
+          name: {{ .Release.Name }}-postgresql
+          key: password
         - name: JAVA_OPTS
           value: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:+AlwaysPreTouch"
         - name: LOG_LEVEL
