@@ -32,7 +32,7 @@ spec:
         imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 80
           protocol: TCP
         env:
         - name: NGINX_PORT
