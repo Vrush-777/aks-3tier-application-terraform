@@ -541,214 +541,205 @@ write_files:
       #!/usr/bin/env bash
       set -Eeuo pipefail
 
-      RESOURCE_GROUP="${1:?ERROR: Missing RESOURCE_GROUP argument}"
-      AKS_CLUSTER="${2:?ERROR: Missing AKS_CLUSTER argument}"
-      IMAGE_TAG="${3:?ERROR: Missing IMAGE_TAG argument}"
-      ACR_SERVER="${4:?ERROR: Missing ACR_SERVER argument}"
-      SUBSCRIPTION_ID="${5:?ERROR: Missing SUBSCRIPTION_ID argument}"
-      CHART_ARCHIVE="${6:?ERROR: Missing CHART_ARCHIVE argument}"
+      RESOURCE_GROUP="${1:?Missing RESOURCE_GROUP}"
+      AKS_CLUSTER="${2:?Missing AKS_CLUSTER}"
+      IMAGE_TAG="${3:?Missing IMAGE_TAG}"
+      ACR_SERVER="${4:?Missing ACR_SERVER}"
+      SUBSCRIPTION_ID="${5:?Missing SUBSCRIPTION_ID}"
+      CHART_ARCHIVE="${6:?Missing CHART_ARCHIVE}"
 
       LOG_DIR="/opt/deploy/logs"
+      mkdir -p "${LOG_DIR}"
+
       LOG_FILE="${LOG_DIR}/deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).log"
-      WORK_DIR="$(mktemp -d /tmp/ems-deploy.XXXXXX)"
+
+      WORK_DIR=$(mktemp -d)
       CHART_DIR="${WORK_DIR}/deploy-pkg/employee-management-system"
 
+      cleanup() {
+          rm -rf "${WORK_DIR}"
+      }
+
+      trap cleanup EXIT
+
       log() {
-        local msg="[$(date --iso-8601=seconds)] $*"
-        echo "${msg}" | tee -a "${LOG_FILE}"
+          echo "[$(date --iso-8601=seconds)] $*" | tee -a "${LOG_FILE}"
       }
 
       fail() {
-        log "ERROR: $*"
-        exit 1
+          log "ERROR: $*"
+          exit 1
       }
 
-      on_error() {
-        local exit_code=$?
-        local line_no=$1
-        fail "Deployment failed at line ${line_no} with exit code ${exit_code}"
-      }
-
-      cleanup() {
-        rm -rf "${WORK_DIR}"
-      }
-
-      trap 'on_error $LINENO' ERR
-      trap cleanup EXIT
-
-      mkdir -p "${LOG_DIR}"
-
-      log "========================================="
-      log "Starting AKS Deployment"
-      log "========================================="
-      log "Resource Group:   ${RESOURCE_GROUP}"
-      log "AKS Cluster:      ${AKS_CLUSTER}"
-      log "Image Tag:        ${IMAGE_TAG}"
-      log "ACR Server:       ${ACR_SERVER}"
-      log "Subscription ID:  ${SUBSCRIPTION_ID}"
-      log "Chart Archive:    ${CHART_ARCHIVE}"
-      log "Log File:         ${LOG_FILE}"
-      log ""
-
-      if [ ! -f "${CHART_ARCHIVE}" ]; then
-          fail "Helm chart archive not found: ${CHART_ARCHIVE}"
-      fi
+      ########################################
+      # Validate archive
+      ########################################
+      [ -f "${CHART_ARCHIVE}" ] || fail "Chart archive not found"
 
       tar -xzf "${CHART_ARCHIVE}" -C "${WORK_DIR}"
 
-      if [ ! -d "${CHART_DIR}" ]; then
-          fail "Helm chart directory not found after extract: ${CHART_DIR}"
-      fi
+      [ -d "${CHART_DIR}" ] || fail "Chart directory not found"
 
-      log "Helm chart archive extracted successfully"
+      ########################################
+      # Azure login
+      ########################################
 
-      log "Step 1/4: Authenticating with system-assigned managed identity..."
-      if ! az login --identity >/dev/null 2>&1; then
-        fail "Failed to authenticate with managed identity"
-      fi
-      log "✅ Authenticated successfully"
-      log ""
+      az login --identity >/dev/null
 
-      log "Step 2/4: Setting subscription to ${SUBSCRIPTION_ID}..."
-      if ! az account set --subscription "${SUBSCRIPTION_ID}" >/dev/null 2>&1; then
-        fail "Failed to set subscription"
-      fi
-      log "✅ Subscription set"
-      log ""
+      az account set \
+      --subscription "${SUBSCRIPTION_ID}"
 
-      log "Step 3/4: Obtaining AKS credentials..."
+      ########################################
+      # AKS login
+      ########################################
 
-      if ! az aks get-credentials \
-        --resource-group "${RESOURCE_GROUP}" \
-        --name "${AKS_CLUSTER}" \
-        --overwrite-existing >/dev/null 2>&1; then
-        fail "Failed to get AKS credentials"
-      fi
+      az aks get-credentials \
+      --resource-group "${RESOURCE_GROUP}" \
+      --name "${AKS_CLUSTER}" \
+      --overwrite-existing
 
       export KUBECONFIG=/root/.kube/config
 
       kubelogin convert-kubeconfig \
-        --kubeconfig "${KUBECONFIG}" \
-        -l msi
+      -l msi \
+      --kubeconfig "${KUBECONFIG}"
 
-      log "Validating AKS connectivity..."
+      kubectl get nodes >/dev/null
 
-      if ! kubectl get nodes >/dev/null 2>&1; then
-        fail "AKS connectivity validation failed"
-      fi
+      ########################################
+      # Helm
+      ########################################
 
-      log "✅ AKS credentials obtained"
-      log ""
+      helm dependency build "${CHART_DIR}"
 
-      if ! kubectl get nodes >/dev/null 2>&1; then
-          fail "AKS connectivity validation failed"
-      fi
+      helm lint "${CHART_DIR}"
 
-      log "Step 4/4: Deploying Helm chart..."
-      helm dependency build "${CHART_DIR}" 2>&1 | tee -a "${LOG_FILE}"
+      helm template employee-management \
+      "${CHART_DIR}" >/dev/null
 
-      if ! helm upgrade --install employee-management \
-           "${CHART_DIR}" \
-           --namespace employee-management \
-           --kubeconfig /root/.kube/config \
-           --create-namespace \
-           --wait \
-           --timeout 10m \
-           --set namespace="employee-management" \
-           --set registry.name="${ACR_SERVER}" \
-           --set backend.image.repository="ems-backend" \
-           --set backend.image.tag="${IMAGE_TAG}" \
-           --set frontend.image.repository="ems-frontend" \
-           --set frontend.image.tag="${IMAGE_TAG}" \
-           2>&1 | tee -a "${LOG_FILE}"; then
-           fail "Helm deployment failed"
-      fi
-      log "✅ Helm chart deployed successfully"
-      log ""
+      ########################################
+      # Deploy
+      ########################################
 
-      log "========================================="
-      log "✅ DEPLOYMENT COMPLETED SUCCESSFULLY"
-      log "========================================="
+      helm upgrade --install employee-management \
+      "${CHART_DIR}" \
+      --namespace employee-management \
+      --create-namespace \
+      --wait \
+      --atomic \
+      --cleanup-on-fail \
+      --timeout 20m \
+      --set namespace=employee-management \
+      --set registry.name="${ACR_SERVER}" \
+      --set backend.image.repository=ems-backend \
+      --set backend.image.tag="${IMAGE_TAG}" \
+      --set frontend.image.repository=ems-frontend \
+      --set frontend.image.tag="${IMAGE_TAG}" \
+      2>&1 | tee -a "${LOG_FILE}"
+
+      ########################################
+      # Verification
+      ########################################
+
+      kubectl rollout status deployment/ems-backend \
+      -n employee-management \
+      --timeout=300s
+
+      kubectl rollout status deployment/ems-frontend \
+      -n employee-management \
+      --timeout=300s
+
+      kubectl rollout status statefulset/employee-management-postgresql \
+      -n employee-management \
+      --timeout=300s
+
+      kubectl wait \
+      --for=condition=Ready pod \
+      --all \
+      -n employee-management \
+      --timeout=300s
+
+      helm status employee-management \
+      -n employee-management
 
       echo "DEPLOYMENT_STATUS=SUCCESS"
-      DEPLOYEOF
-        chmod 0755 /opt/deploy/deploy.sh
+        DEPLOYEOF
+          chmod 0755 /opt/deploy/deploy.sh
 
-        log "✅ Helper scripts created and configured"
-      }
+          log "✅ Helper scripts created and configured"
+        }
 
-      validate_installation() {
-        log_section "Validating Installed Tools"
-        
-        local failed=0
-        
-        for tool in az kubectl helm kubelogin jq unzip git; do
-          if command -v "${tool}" >/dev/null; then
-            log "✅ ${tool} is installed"
-          else
-            log "❌ ${tool} is NOT installed"
-            failed=$((failed + 1))
+        validate_installation() {
+          log_section "Validating Installed Tools"
+          
+          local failed=0
+          
+          for tool in az kubectl helm kubelogin jq unzip git; do
+            if command -v "${tool}" >/dev/null; then
+              log "✅ ${tool} is installed"
+            else
+              log "❌ ${tool} is NOT installed"
+              failed=$((failed + 1))
+            fi
+          done
+
+          if [ "${failed}" -gt 0 ]; then
+            fail "${failed} required tool(s) are missing"
           fi
-        done
 
-        if [ "${failed}" -gt 0 ]; then
-          fail "${failed} required tool(s) are missing"
-        fi
+          log ""
+          log "Tool versions:"
+          az version -o json 2>/dev/null | jq -r '."azure-cli"' || true
+          kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' || true
+          helm version -o json 2>/dev/null | jq -r '.version' || true
 
-        log ""
-        log "Tool versions:"
-        az version -o json 2>/dev/null | jq -r '."azure-cli"' || true
-        kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion' || true
-        helm version -o json 2>/dev/null | jq -r '.version' || true
+          log "✅ All required tools are installed and functional"
+        }
 
-        log "✅ All required tools are installed and functional"
-      }
+        create_bootstrap_marker() {
+          log_section "Creating Bootstrap Completion Marker"
+          
+          touch "${BOOTSTRAP_MARKER}"
+          log "✅ Marker file created: ${BOOTSTRAP_MARKER}"
+          log "   Timestamp: $(stat -c '%y' "${BOOTSTRAP_MARKER}" 2>/dev/null || echo 'unknown')"
+          
+          # Remove failed marker if it exists
+          rm -f "${BOOTSTRAP_FAILED_MARKER}"
+        }
 
-      create_bootstrap_marker() {
-        log_section "Creating Bootstrap Completion Marker"
-        
-        touch "${BOOTSTRAP_MARKER}"
-        log "✅ Marker file created: ${BOOTSTRAP_MARKER}"
-        log "   Timestamp: $(stat -c '%y' "${BOOTSTRAP_MARKER}" 2>/dev/null || echo 'unknown')"
-        
-        # Remove failed marker if it exists
-        rm -f "${BOOTSTRAP_FAILED_MARKER}"
-      }
+        main() {
+          log_section "AKS Jump VM Bootstrap"
+          log "Starting at: $(date --iso-8601=seconds)"
+          log "Kubectl Version: ${KUBECTL_VERSION}"
+          log "Kubelogin Version: ${KUBELOGIN_VERSION}"
+          log ""
 
-      main() {
-        log_section "AKS Jump VM Bootstrap"
-        log "Starting at: $(date --iso-8601=seconds)"
-        log "Kubectl Version: ${KUBECTL_VERSION}"
-        log "Kubelogin Version: ${KUBELOGIN_VERSION}"
-        log ""
+          # Check if already completed
+          if check_idempotency; then
+            log "✅ Bootstrap completed previously, skipping re-initialization"
+            exit 0
+          fi
 
-        # Check if already completed
-        if check_idempotency; then
-          log "✅ Bootstrap completed previously, skipping re-initialization"
-          exit 0
-        fi
+          check_system_preconditions
+          install_base_packages
+          install_azure_cli
+          install_kubectl
+          install_helm
+          install_kubelogin
+          configure_jumpvm_profile
+          validate_installation
+          create_bootstrap_marker
 
-        check_system_preconditions
-        install_base_packages
-        install_azure_cli
-        install_kubectl
-        install_helm
-        install_kubelogin
-        configure_jumpvm_profile
-        validate_installation
-        create_bootstrap_marker
+          log_section "Bootstrap Completed Successfully"
+          log "Completed at: $(date --iso-8601=seconds)"
+          log ""
+          log "Jump VM is ready for AKS deployments"
+          log "Log file: ${BOOTSTRAP_LOG}"
+        }
 
-        log_section "Bootstrap Completed Successfully"
-        log "Completed at: $(date --iso-8601=seconds)"
-        log ""
-        log "Jump VM is ready for AKS deployments"
-        log "Log file: ${BOOTSTRAP_LOG}"
-      }
+        main "$@"
+    runcmd:
+    # Run bootstrap script with full output capture
+    - [bash, -lc, "/usr/local/sbin/bootstrap-jumpvm.sh"]
 
-      main "$@"
-
-runcmd:
-  # Run bootstrap script with full output capture
-  - [bash, -lc, "/usr/local/sbin/bootstrap-jumpvm.sh"]
-
-final_message: "Jump VM initialization completed. Check /var/log/bootstrap-jumpvm.log for details."
+    final_message: "Jump VM initialization completed. Check /var/log/bootstrap-jumpvm.log for details."

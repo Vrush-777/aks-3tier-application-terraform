@@ -226,408 +226,172 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # =========================================================================
-  # Job 4: Deploy to Private AKS via Jump VM
-  # =========================================================================
-  deploy-to-aks:
-    name: Deploy to Private AKS
-    runs-on: ubuntu-latest
-    needs:
+# =========================================================================
+# Job 4: Deploy to Private AKS via Jump VM
+# =========================================================================
+deploy-to-aks:
+  name: Deploy to Private AKS
+  runs-on: ubuntu-latest
+
+  needs:
     - detect-changes
     - build-backend
-    - build-frontend  
-    if: |
-      needs.build-backend.result == 'success' ||
-      needs.build-frontend.result == 'success'
+    - build-frontend
 
+  if: |
+    needs.build-backend.result == 'success' ||
+    needs.build-frontend.result == 'success'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Azure Login (Service Principal)
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        - name: Checkout code
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Get Terraform Outputs
-        id: terraform
-        run: |
-          # Get Terraform outputs (requires terraform CLI)
-          # For now, using static values from GitHub Secrets
-          JUMP_VM_NAME="${{ secrets.JUMP_VM_NAME }}"
-          # Determine which image tag to use
+        - name: Azure Login
+          uses: azure/login@v2
+          with:
+            creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+        - name: Determine image tag
+          id: image
+          shell: bash
+          run: |
             if [ -n "${{ needs.build-backend.outputs.backend-image-tag }}" ]; then
               IMAGE_TAG="${{ needs.build-backend.outputs.backend-image-tag }}"
             elif [ -n "${{ needs.build-frontend.outputs.frontend-image-tag }}" ]; then
               IMAGE_TAG="${{ needs.build-frontend.outputs.frontend-image-tag }}"
             else
-              echo "ERROR: No image tag found"
+              echo "No image tag found"
               exit 1
             fi
 
-          if [ -z "$JUMP_VM_NAME" ]; then
-            echo "ERROR: JUMP_VM_NAME secret not set"
+            echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+        - name: Package Helm Chart
+          run: |
+            rm -rf deploy-pkg
+            mkdir -p deploy-pkg
+
+            cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
+
+            tar -czf deploy-artifacts.tar.gz deploy-pkg
+
+            ls -lh deploy-artifacts.tar.gz
+
+        - name: Upload Helm package to Jump VM
+          uses: azure/CLI@v2
+          with:
+            inlineScript: |
+              set -e
+
+              JUMP_VM="${{ secrets.JUMP_VM_NAME }}"
+
+              echo "Encoding Helm package..."
+
+              ARCHIVE_BASE64=$(base64 -w 0 deploy-artifacts.tar.gz)
+
+              az vm run-command invoke \
+                --resource-group "${{ env.RESOURCE_GROUP }}" \
+                --name "$JUMP_VM" \
+                --command-id RunShellScript \
+                --scripts "
+                  mkdir -p /tmp
+
+                  cat <<'EOF' >/tmp/deploy-artifacts.tar.gz.b64
+                  ${ARCHIVE_BASE64}
+                  EOF
+
+                  base64 -d /tmp/deploy-artifacts.tar.gz.b64 > /tmp/deploy-artifacts.tar.gz
+
+                  rm -f /tmp/deploy-artifacts.tar.gz.b64
+
+                  ls -lh /tmp/deploy-artifacts.tar.gz
+                "
+
+        - name: Execute deploy.sh
+          uses: azure/CLI@v2
+          with:
+            inlineScript: |
+              set -e
+
+              JUMP_VM="${{ secrets.JUMP_VM_NAME }}"
+              IMAGE_TAG="${{ steps.image.outputs.image_tag }}"
+
+              DEPLOY_OUTPUT=$(az vm run-command invoke \
+                --resource-group "${{ env.RESOURCE_GROUP }}" \
+                --name "$JUMP_VM" \
+                --command-id RunShellScript \
+                --scripts "
+                  sudo /opt/deploy/deploy.sh \
+                  '${{ env.RESOURCE_GROUP }}' \
+                  '${{ env.AKS_CLUSTER_NAME }}' \
+                  '${IMAGE_TAG}' \
+                  '${{ env.ACR_LOGIN_SERVER }}' \
+                  '${{ env.AZURE_SUBSCRIPTION_ID }}' \
+                  '/tmp/deploy-artifacts.tar.gz'
+                " \
+                --query value[0].message \
+                -o tsv)
+
+              echo "$DEPLOY_OUTPUT"
+
+              echo "$DEPLOY_OUTPUT" | grep DEPLOYMENT_STATUS=SUCCESS
+
+        - name: Verify Deployment
+          uses: azure/CLI@v2
+          with:
+            inlineScript: |
+              JUMP_VM="${{ secrets.JUMP_VM_NAME }}"
+
+              az vm run-command invoke \
+                --resource-group "${{ env.RESOURCE_GROUP }}" \
+                --name "$JUMP_VM" \
+                --command-id RunShellScript \
+                --scripts "
+                  helm status employee-management -n employee-management
+
+                  kubectl get all -n employee-management
+
+                  kubectl wait \
+                    --for=condition=ready pod \
+                    --all \
+                    -n employee-management \
+                    --timeout=300s
+                "
+
+        - name: Deployment Summary
+          if: success()
+          run: |
+
+            echo "====================================="
+            echo "DEPLOYMENT SUCCESSFUL"
+            echo "====================================="
+
+            echo "Backend:"
+            echo "${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ steps.image.outputs.image_tag }}"
+
+            echo ""
+
+            echo "Frontend:"
+            echo "${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ steps.image.outputs.image_tag }}"
+
+            echo ""
+
+            echo "Namespace:"
+            echo "employee-management"
+
+        - name: Notify Failure
+          if: failure()
+          run: |
+
+            echo "DEPLOYMENT FAILED"
+
+            echo "Check:"
+            echo "/opt/deploy/logs"
+
             exit 1
-          fi
-
-          echo "jump_vm_name=${JUMP_VM_NAME}" >> $GITHUB_OUTPUT
-          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "resource_group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
-          echo "aks_cluster=${AKS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
-          echo "acr_server=${ACR_LOGIN_SERVER}" >> $GITHUB_OUTPUT
-
-      # ========================================================================
-      # REQUIREMENT 4: Validate deploy.sh existence before deployment
-      # ========================================================================
-      - name: Prepare deployment artifacts
-        run: |
-          echo "Preparing deployment artifacts..."
-          rm -rf deploy-pkg deploy-artifacts.tar.gz
-          mkdir -p deploy-pkg
-          cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
-          tar -czf deploy-artifacts.tar.gz deploy-pkg/
-          echo "Helm chart prepared for deployment"
-
-      - name: Validate deploy.sh exists on Jump VM
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            set -e
-
-            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
-            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
-
-            echo "🔍 Validating deploy.sh exists on Jump VM..."
-
-            az vm run-command invoke \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${JUMP_VM_NAME}" \
-              --command-id RunShellScript \
-              --scripts "
-              timeout=600
-
-              while [ \$timeout -gt 0 ]; do
-                if [ -f /opt/deploy/deploy.sh ]; then
-                  echo '✅ deploy.sh found'
-                  ls -l /opt/deploy/deploy.sh
-
-                  if [ ! -x /opt/deploy/deploy.sh ]; then
-                    echo '⚠️ deploy.sh is not executable'
-                    chmod 755 /opt/deploy/deploy.sh
-                    echo '✅ Permissions fixed'
-                  fi
-
-                  exit 0
-                  fi
-
-                  echo '⏳ Waiting for cloud-init to complete...'
-                  sleep 30
-                  timeout=\$((timeout-30))
-                done
-
-                echo '❌ Timeout waiting for deploy.sh'
-                exit 1
-              " \
-              --query 'value[0].message' \
-              --output tsv
-
-      # ========================================================================
-      # FIX 1: Improved deployment success detection
-      # Requires: deploy.sh prints "DEPLOYMENT_STATUS=SUCCESS" on successful completion
-      # See: terraform/scripts/jumpvm-cloud-init.yaml - add after helm upgrade --install
-      # ========================================================================
-      - name: Deploy via Jump VM - Run Command
-        id: deploy
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            set -e
-
-            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
-            IMAGE_TAG="${{ steps.terraform.outputs.image_tag }}"
-            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
-            AKS_CLUSTER="${{ steps.terraform.outputs.aks_cluster }}"
-            ACR_SERVER="${{ steps.terraform.outputs.acr_server }}"
-            SUBSCRIPTION_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
-
-            echo "🚀 Starting deployment to private AKS cluster..."
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Jump VM: ${JUMP_VM_NAME}"
-            echo "Resource Group: ${RESOURCE_GROUP}"
-            echo "AKS Cluster: ${AKS_CLUSTER}"
-            echo "Image Tag: ${IMAGE_TAG}"
-            echo "ACR Server: ${ACR_SERVER}"
-            echo "Subscription ID: ${SUBSCRIPTION_ID}"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            # ════════════════════════════════════════════════════════════════════
-            # DEBUG 1: Verify deploy-artifacts.tar.gz exists and has content
-            # ════════════════════════════════════════════════════════════════════
-            if [ ! -f deploy-artifacts.tar.gz ]; then
-              echo "❌ ERROR: deploy-artifacts.tar.gz not found"
-              exit 1
-            fi
-            
-            ARCHIVE_SIZE=$(stat -f%z deploy-artifacts.tar.gz 2>/dev/null || stat -c%s deploy-artifacts.tar.gz 2>/dev/null)
-            echo "✅ Archive file size: ${ARCHIVE_SIZE} bytes"
-
-            # ════════════════════════════════════════════════════════════════════
-            # Encode chart archive to base64 for transmission
-            # ════════════════════════════════════════════════════════════════════
-            CHART_ARCHIVE_B64="$(base64 -w0 deploy-artifacts.tar.gz)"
-            REMOTE_CHART_ARCHIVE="/tmp/deploy-artifacts-${{ github.run_id }}.tar.gz"
-
-            echo "✅ Base64 encoding complete (length: ${#CHART_ARCHIVE_B64} chars)"
-            echo "✅ Remote archive path: ${REMOTE_CHART_ARCHIVE}"
-
-            # ════════════════════════════════════════════════════════════════════
-            # FIXED: Generate invoke-deploy.sh with proper quoting and argument passing
-            # ════════════════════════════════════════════════════════════════════
-            cat > invoke-deploy.sh <<'DEPLOY_WRAPPER_SCRIPT'
-            #!/bin/bash
-            set -e
-
-            # Extract passed variables from the deployment script
-            CHART_ARCHIVE_B64_CONTENT="CHART_ARCHIVE_B64_PLACEHOLDER"
-            REMOTE_CHART_ARCHIVE="REMOTE_CHART_ARCHIVE_PLACEHOLDER"
-            RESOURCE_GROUP_ARG="RESOURCE_GROUP_PLACEHOLDER"
-            AKS_CLUSTER_ARG="AKS_CLUSTER_PLACEHOLDER"
-            IMAGE_TAG_ARG="IMAGE_TAG_PLACEHOLDER"
-            ACR_SERVER_ARG="ACR_SERVER_PLACEHOLDER"
-            SUBSCRIPTION_ID_ARG="SUBSCRIPTION_ID_PLACEHOLDER"
-
-            echo "────────────────────────────────────────────────────────────"
-            echo "📝 Deployment Arguments Received:"
-            echo "────────────────────────────────────────────────────────────"
-            echo "Arg 1 (RESOURCE_GROUP): '${RESOURCE_GROUP_ARG}'"
-            echo "Arg 2 (AKS_CLUSTER): '${AKS_CLUSTER_ARG}'"
-            echo "Arg 3 (IMAGE_TAG): '${IMAGE_TAG_ARG}'"
-            echo "Arg 4 (ACR_SERVER): '${ACR_SERVER_ARG}'"
-            echo "Arg 5 (SUBSCRIPTION_ID): '${SUBSCRIPTION_ID_ARG}'"
-            echo "Arg 6 (CHART_ARCHIVE): '${REMOTE_CHART_ARCHIVE}'"
-            echo "────────────────────────────────────────────────────────────"
-
-            # Decode base64 chart archive
-            echo ""
-            echo "📦 Decoding chart archive..."
-            echo "${CHART_ARCHIVE_B64_CONTENT}" | base64 -d > "${REMOTE_CHART_ARCHIVE}"
-            
-            if [ ! -f "${REMOTE_CHART_ARCHIVE}" ]; then
-              echo "❌ ERROR: Failed to decode chart archive"
-              exit 1
-            fi
-            
-            ARCHIVE_SIZE=$(stat -f%z "${REMOTE_CHART_ARCHIVE}" 2>/dev/null || stat -c%s "${REMOTE_CHART_ARCHIVE}" 2>/dev/null)
-            echo "✅ Chart archive decoded: ${ARCHIVE_SIZE} bytes at ${REMOTE_CHART_ARCHIVE}"
-
-            # Validate deploy.sh exists
-            if [ ! -x /opt/deploy/deploy.sh ]; then
-              echo "❌ ERROR: /opt/deploy/deploy.sh not found or not executable"
-              ls -la /opt/deploy/ || true
-              exit 1
-            fi
-
-            echo ""
-            echo "🚀 Invoking deploy.sh with all arguments..."
-            echo "────────────────────────────────────────────────────────────"
-
-            # Call deploy.sh with all 6 required arguments
-            # Using eval with quoted arguments to preserve whitespace
-            eval "/opt/deploy/deploy.sh" \
-              "\"${RESOURCE_GROUP_ARG}\"" \
-              "\"${AKS_CLUSTER_ARG}\"" \
-              "\"${IMAGE_TAG_ARG}\"" \
-              "\"${ACR_SERVER_ARG}\"" \
-              "\"${SUBSCRIPTION_ID_ARG}\"" \
-              "\"${REMOTE_CHART_ARCHIVE}\""
-
-            DEPLOY_RESULT=$?
-
-            echo "────────────────────────────────────────────────────────────"
-            if [ ${DEPLOY_RESULT} -eq 0 ]; then
-              echo "✅ Deploy script exited successfully"
-            else
-              echo "❌ Deploy script exited with code: ${DEPLOY_RESULT}"
-              exit ${DEPLOY_RESULT}
-            fi
-            DEPLOY_WRAPPER_SCRIPT
-
-            # ════════════════════════════════════════════════════════════════════
-            # DEBUG 2: Substitute actual values into the wrapper script
-            # ════════════════════════════════════════════════════════════════════
-            sed -i "s|CHART_ARCHIVE_B64_PLACEHOLDER|${CHART_ARCHIVE_B64}|g" invoke-deploy.sh
-            sed -i "s|REMOTE_CHART_ARCHIVE_PLACEHOLDER|${REMOTE_CHART_ARCHIVE}|g" invoke-deploy.sh
-            sed -i "s|RESOURCE_GROUP_PLACEHOLDER|${RESOURCE_GROUP}|g" invoke-deploy.sh
-            sed -i "s|AKS_CLUSTER_PLACEHOLDER|${AKS_CLUSTER}|g" invoke-deploy.sh
-            sed -i "s|IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g" invoke-deploy.sh
-            sed -i "s|ACR_SERVER_PLACEHOLDER|${ACR_SERVER}|g" invoke-deploy.sh
-            sed -i "s|SUBSCRIPTION_ID_PLACEHOLDER|${SUBSCRIPTION_ID}|g" invoke-deploy.sh
-
-            # ════════════════════════════════════════════════════════════════════
-            # DEBUG 3: Print the complete generated invoke-deploy.sh (without base64)
-            # ════════════════════════════════════════════════════════════════════
-            echo ""
-            echo "📄 Generated invoke-deploy.sh (first 100 lines):"
-            echo "════════════════════════════════════════════════════════════════════"
-            head -100 invoke-deploy.sh | sed 's/[A-Za-z0-9+/=]\{64,\}/<<<BASE64_CONTENT_TRUNCATED>>>/g'
-            echo "════════════════════════════════════════════════════════════════════"
-            echo ""
-
-            # Verify script size
-            SCRIPT_SIZE=$(wc -c < invoke-deploy.sh)
-            echo "✅ Generated script size: ${SCRIPT_SIZE} bytes"
-            echo ""
-
-            # ════════════════════════════════════════════════════════════════════
-            # DEBUG 4: Execute the deployment script on Jump VM
-            # ════════════════════════════════════════════════════════════════════
-            echo "🌐 Sending deployment script to Jump VM: ${JUMP_VM_NAME}"
-            echo ""
-
-            set +e
-            DEPLOY_MESSAGE=$(az vm run-command invoke \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${JUMP_VM_NAME}" \
-              --command-id RunShellScript \
-              --scripts "$(cat invoke-deploy.sh)" \
-              --query 'value[0].message' \
-              --output tsv 2>&1)
-            DEPLOY_EXIT_CODE=$?
-            set -e
-
-            echo ""
-            echo "📋 Deployment Output:"
-            echo "════════════════════════════════════════════════════════════════════"
-            echo "${DEPLOY_MESSAGE}"
-            echo "════════════════════════════════════════════════════════════════════"
-            echo ""
-
-            if [ "${DEPLOY_EXIT_CODE}" -ne 0 ]; then
-              echo ""
-              echo "❌ Azure VM Run Command failed with exit code ${DEPLOY_EXIT_CODE}"
-              exit "${DEPLOY_EXIT_CODE}"
-            fi
-
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-            # DEBUG 5: Verify deployment success
-            # deploy.sh MUST print "DEPLOYMENT_STATUS=SUCCESS" on successful completion
-            if ! echo "${DEPLOY_MESSAGE}" | grep -q "DEPLOYMENT_STATUS=SUCCESS"; then
-              echo "❌ Deployment failed on Jump VM"
-              echo ""
-              echo "Deployment output did not contain success marker: DEPLOYMENT_STATUS=SUCCESS"
-              echo ""
-              echo "Full deployment output:"
-              echo "${DEPLOY_MESSAGE}"
-              exit 1
-            fi
-
-            echo "✅ Deployment script executed successfully"
-            echo ""
-            echo "Last 20 lines of deployment output:"
-            echo "${DEPLOY_MESSAGE}" | tail -20
-
-      # ========================================================================
-      # FIX 2: Correct Verify Deployment Status implementation
-      # VERIFICATION_SCRIPT contains ONLY commands that execute ON THE JUMP VM
-      # Azure CLI commands are executed OUTSIDE the script definition
-      # ========================================================================
-      - name: Verify Deployment Status
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            set -e
-
-            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
-            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
-
-            echo "📊 Verifying deployment status on private AKS cluster..."
-            echo ""
-
-            # FIX 2: Define VERIFICATION_SCRIPT with ONLY Jump VM commands
-            # This script executes entirely on the Jump VM using its kubeconfig
-            # No Azure CLI commands are embedded in this script
-            VERIFICATION_SCRIPT="
-            set -Eeuo pipefail
-
-            echo 'Checking Kubernetes pod status in employee-management namespace...'
-            echo ''
-
-            # FIX 3: Simplified pod status check (no JSON parsing)
-            echo 'Current pod status:'
-            kubectl get pods -n employee-management
-            echo ''
-
-            # FIX 3: Fail if unhealthy pods detected
-            if kubectl get pods -n employee-management | grep -E 'CrashLoopBackOff|Error|Failed'; then
-              echo '❌ ERROR: Unhealthy pods detected'
-              exit 1
-            fi
-
-            echo ''
-            echo 'Checking Helm release status...'
-            echo ''
-
-            # FIX 4: Use helm status command (not JSON parsing)
-            HELM_STATUS=\$(helm status employee-management -n employee-management)
-
-            echo \"\${HELM_STATUS}\"
-            echo ''
-
-            # FIX 4: Validate Helm release status is deployed
-            if ! echo \"\${HELM_STATUS}\" | grep -q '^STATUS: deployed'; then
-              echo '❌ ERROR: Helm release is not deployed'
-              exit 1
-            fi
-
-            echo '✅ Helm release status is deployed'
-            echo ''
-            echo '✅ All deployment verifications passed'
-            "
-
-            # FIX 2: Execute VERIFICATION_SCRIPT on Jump VM
-            # Azure CLI command is executed OUTSIDE the script definition
-            az vm run-command invoke \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${JUMP_VM_NAME}" \
-              --command-id RunShellScript \
-              --scripts "${VERIFICATION_SCRIPT}"
-
-            echo ""
-            echo "✅ Deployment verification complete"
-
-      - name: Deployment Summary
-        if: success()
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ DEPLOYMENT SUCCESSFUL"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          echo "Deployment Details:"
-          echo "  Backend Image: ${{ env.ACR_LOGIN_SERVER }}/ems-backend:${{ needs.build-backend.outputs.backend-image-tag }}"
-          echo "  Frontend Image: ${{ env.ACR_LOGIN_SERVER }}/ems-frontend:${{ needs.build-frontend.outputs.frontend-image-tag }}"
-          echo "  AKS Cluster: ${{ steps.terraform.outputs.aks_cluster }}"
-          echo "  Namespace: employee-management"
-          echo ""
-          echo "Application should be available at your configured ingress endpoint."
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-      - name: Notify on Failure
-        if: failure()
-        run: |
-          echo "❌ DEPLOYMENT FAILED"
-          echo ""
-          echo "Common issues to check:"
-          echo "1. Verify JUMP_VM_NAME secret is set correctly"
-          echo "2. Ensure Jump VM has required role assignments"
-          echo "3. Check Jump VM system-assigned managed identity is enabled"
-          echo "4. Review deployment logs on the Jump VM: /opt/deploy/logs/"
-          exit 1
-
   # =========================================================================
   # Job 5: Post-Deployment Validation
   # =========================================================================

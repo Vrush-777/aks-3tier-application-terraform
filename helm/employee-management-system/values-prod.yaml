@@ -15,7 +15,7 @@ frontend:
     tag: "latest"
     pullPolicy: Always
   service:
-    type: LoadBalancer
+    type: ClusterIP
   ingress:
     annotations:
       cert-manager.io/cluster-issuer: "letsencrypt-prod"

@@ -35,8 +35,6 @@ spec:
           containerPort: 80
           protocol: TCP
         env:
-        - name: NGINX_PORT
-          value: "80"
         - name: BACKEND_URL
           value: "http://ems-backend:8080"
         livenessProbe:
@@ -58,7 +56,11 @@ spec:
           failureThreshold: 3
         resources:
           {{- toYaml .Values.frontend.resources | nindent 10 }}
-        securityContext: {}
+        securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
         volumeMounts:
         - name: nginx-cache
           mountPath: /var/cache/nginx

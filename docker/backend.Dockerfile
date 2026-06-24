@@ -13,7 +13,7 @@ RUN mvn dependency:go-offline -B
 COPY src src
 
 # Build application with optimizations
-RUN mvn clean package -DskipTests -q
+RUN mvn clean package -DskipTests
 
 # Stage 2: Runtime stage - Production image
 FROM eclipse-temurin:21-jre-alpine
@@ -53,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8080/actuator/health || exit 1
 
 # Run the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["sh","-c","java $JAVA_OPTS -jar app.jar"]

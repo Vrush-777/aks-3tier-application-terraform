@@ -31,7 +31,7 @@ frontend:
     tag: "latest"
 
   service:
-    type: LoadBalancer
+    type: ClusterIP
     port: 80
     targetPort: 80
     annotations: {}
@@ -39,18 +39,13 @@ frontend:
   ingress:
     enabled: true
     className: "azure-application-gateway"
-    annotations:
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-      nginx.ingress.kubernetes.io/rate-limit: "100"
+    annotations: {}
     hosts:
       - host: app.example.com
         paths:
           - path: /
             pathType: Prefix
-    tls:
-      - secretName: frontend-tls
-        hosts:
-          - app.example.com
+    tls: []
 
   resources:
     limits:
@@ -91,18 +86,13 @@ backend:
   ingress:
     enabled: true
     className: "azure-application-gateway"
-    annotations:
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-      nginx.ingress.kubernetes.io/rate-limit: "100"
+    annotations: {}
     hosts:
       - host: api.example.com
         paths:
           - path: /
             pathType: Prefix
-    tls:
-      - secretName: backend-tls
-        hosts:
-          - api.example.com
+    tls: []
 
   resources:
     limits:
@@ -150,7 +140,7 @@ postgresql:
 
   image:
     registry: docker.io
-    repository: bitnamilegacy/postgresql
+    repository: bitnami/postgresql
     tag: "17.6.0-debian-12-r4"
 
   auth:
