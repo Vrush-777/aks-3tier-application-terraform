@@ -82,7 +82,8 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 3
         resources:
-          {{ toYaml .Values.backend.resources | nindent 10 }}
+          {{- toYaml .Values.backend.resources | nindent 10 }}
+
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
