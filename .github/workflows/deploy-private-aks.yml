@@ -308,12 +308,24 @@ jobs:
           cat verify/deploy-pkg/employee-management-system/templates/secret.yaml
 
           echo ""
+          echo "================ Secret with line numbers ================"
+          nl -ba verify/deploy-pkg/employee-management-system/templates/secret.yaml
+
+          echo ""
           echo "================ Helpers ================"
           cat verify/deploy-pkg/employee-management-system/templates/_helpers.tpl
 
           echo ""
+          echo "================ Helpers with line numbers ================"
+          nl -ba verify/deploy-pkg/employee-management-system/templates/_helpers.tpl
+
+          echo ""
           echo "================ Chart.yaml ================"
           cat verify/deploy-pkg/employee-management-system/Chart.yaml
+
+          echo ""
+          echo "================ Helm Dependency Build ================"
+          helm dependency build verify/deploy-pkg/employee-management-system
 
           echo ""
           echo "================ Helm Lint ================"

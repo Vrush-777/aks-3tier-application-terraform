@@ -31,7 +31,7 @@ Create chart name and version as used by the chart label.
 {{/*
 Common labels
 */}}
-{{- define "employee-management-system.labels" -}}
+{{ define "employee-management-system.labels" }}
 helm.sh/chart: {{ include "employee-management-system.chart" . }}
 app.kubernetes.io/name: {{ include "employee-management-system.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -42,7 +42,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- with .Values.commonLabels }}
 {{ toYaml . }}
 {{- end }}
-{{- end }}
+{{ end }}
 
 {{/*
 Selector labels
