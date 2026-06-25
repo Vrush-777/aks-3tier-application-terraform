@@ -44,8 +44,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ include "employee-management-system.secretName" . }}
-              key: postgres-username
-
+      key: postgres-username
         - name: SPRING_DATASOURCE_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -83,13 +82,13 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 3
         resources:
-          {{- toYaml .Values.backend.resources | nindent 10 }}
+          {{ toYaml .Values.backend.resources | nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities:
             drop:
-            - ALL
+              - ALL
         volumeMounts:
         - name: tmp
           mountPath: /tmp
