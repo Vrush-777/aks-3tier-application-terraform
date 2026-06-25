@@ -288,8 +288,40 @@ jobs:
           rm -rf deploy-pkg deploy-artifacts.tar.gz
           mkdir -p deploy-pkg
           cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
+          echo "===== Files being packaged ====="
+          find deploy-pkg -type f | sort
           tar -czf deploy-artifacts.tar.gz deploy-pkg/
           echo "Helm chart prepared for deployment"
+      
+      - name: Verify packaged Helm chart
+        shell: bash
+        run: |
+          echo "================ Archive Contents ================"
+          tar -tzf deploy-artifacts.tar.gz
+
+          mkdir verify
+
+          tar -xzf deploy-artifacts.tar.gz -C verify
+
+          echo ""
+          echo "================ Secret.yaml ================"
+          cat verify/deploy-pkg/employee-management-system/templates/secret.yaml
+
+          echo ""
+          echo "================ Helpers ================"
+          cat verify/deploy-pkg/employee-management-system/templates/_helpers.tpl
+
+          echo ""
+          echo "================ Chart.yaml ================"
+          cat verify/deploy-pkg/employee-management-system/Chart.yaml
+
+          echo ""
+          echo "================ Helm Lint ================"
+          helm lint verify/deploy-pkg/employee-management-system
+
+          echo ""
+          echo "================ Helm Template ================"
+          helm template employee-management verify/deploy-pkg/employee-management-system
  
       - name: Validate deploy.sh exists on Jump VM
         uses: azure/CLI@v1
