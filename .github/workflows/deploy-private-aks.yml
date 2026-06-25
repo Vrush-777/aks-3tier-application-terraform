@@ -328,15 +328,32 @@ jobs:
           helm dependency build verify/deploy-pkg/employee-management-system
 
           echo ""
-          echo "================ Helm Lint ================"
-          helm lint verify/deploy-pkg/employee-management-system
-
-          echo ""
-          echo "================ Helm Template ================"
+          echo "================ Backend Deployment Render ================"
           helm template employee-management \
           verify/deploy-pkg/employee-management-system \
           --debug \
-          --show-only templates/secret.yaml
+          --show-only templates/deployment-backend.yaml
+
+          echo ""
+          echo "================ Frontend Deployment Render ================"
+          helm template employee-management \
+          verify/deploy-pkg/employee-management-system \
+          --debug \
+          --show-only templates/deployment-frontend.yaml
+
+          echo ""
+          echo "================ Full Helm Template ================"
+          helm template employee-management \
+          verify/deploy-pkg/employee-management-system \
+          --debug > rendered.yaml
+
+          echo ""
+          echo "================ First 250 lines of rendered.yaml ================"
+          head -250 rendered.yaml
+
+          echo ""
+          echo "================ Helm Lint ================"
+          helm lint verify/deploy-pkg/employee-management-system
  
       - name: Validate deploy.sh exists on Jump VM
         uses: azure/CLI@v1
