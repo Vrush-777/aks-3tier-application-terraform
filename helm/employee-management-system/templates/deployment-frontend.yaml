@@ -22,10 +22,6 @@ spec:
         app.kubernetes.io/component: frontend
     spec:
       serviceAccountName: {{ .Values.frontend.name }}
-      # securityContext:
-      #   runAsNonRoot: true
-      #   runAsUser: 101
-      #   fsGroup: 101
       containers:
       - name: {{ .Values.frontend.name }}
         image: "{{ .Values.registry.name }}/{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
@@ -61,24 +57,10 @@ spec:
             capabilities:
               drop:
                 - ALL
-        volumeMounts:
-        - name: nginx-cache
-          mountPath: /var/cache/nginx
-        - name: nginx-run
-          mountPath: /var/run
-        - name: nginx-log
-          mountPath: /var/log/nginx
       {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       {{- end }}
-      volumes:
-      - name: nginx-cache
-        emptyDir: {}
-      - name: nginx-run
-        emptyDir: {}
-      - name: nginx-log
-        emptyDir: {}
       {{- with .Values.frontend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

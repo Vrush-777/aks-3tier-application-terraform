@@ -31,7 +31,8 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Create non-root user for security (principle of least privilege)
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN addgroup -g 1000 appgroup && \
+    adduser -D -u 1000 -G appgroup appuser
 
 # Copy built JAR from maven-builder stage
 COPY --from=maven-builder /build/target/*.jar app.jar
@@ -40,7 +41,7 @@ COPY --from=maven-builder /build/target/*.jar app.jar
 RUN chown -R appuser:appgroup /app
 
 # Switch to non-root user
-USER appuser
+USER 1000
 
 # Expose Spring Boot server port
 EXPOSE 8080

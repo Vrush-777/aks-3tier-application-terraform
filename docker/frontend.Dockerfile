@@ -22,35 +22,17 @@ RUN npm run build
 # Stage 2: Runtime stage - Nginx production server
 FROM nginx:1.27-alpine
 
-LABEL maintainer="Platform Engineering Team"
-LABEL description="EMS Frontend - Nginx Production Server"
-
-# Install curl for healthchecks
 RUN apk add --no-cache curl
 
-# Create non-root user for security
-RUN addgroup -S www-user && adduser -S nginx-user -G www-user || true
-
-# Remove default nginx config
 RUN rm -f /etc/nginx/conf.d/default.conf
 
-# Copy custom Nginx configuration for SPA routing
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy built application from builder stage
 COPY --from=node-builder /build/dist /usr/share/nginx/html
-
-# Change ownership for security
-RUN chown -R nginx-user:www-user /usr/share/nginx/html && \
-    chown -R nginx-user:www-user /var/cache/nginx && \
-    chown -R nginx-user:www-user /var/log/nginx && \
-    chown -R nginx-user:www-user /etc/nginx/conf.d && \
-    touch /var/run/nginx.pid && \
-    chown -R nginx-user:www-user /var/run/nginx.pid
 
 EXPOSE 80
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost/ || exit 1
+HEALTHCHECK --interval=30s --timeout=5s \
+CMD curl -f http://localhost/health || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["nginx","-g","daemon off;"]
