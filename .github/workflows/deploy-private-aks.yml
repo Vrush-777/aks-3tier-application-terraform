@@ -285,12 +285,40 @@ jobs:
       - name: Prepare deployment artifacts
         run: |
           echo "Preparing deployment artifacts..."
+
+          echo ""
+          echo "================ Git Information ================"
+          echo "Current Commit:"
+          git rev-parse HEAD
+
+          echo ""
+          echo "Current Branch:"
+          git branch --show-current
+
+          echo ""
+          echo "================ Source values.yaml ================"
+          grep -n "className\|type:" "${{ env.HELM_CHART_PATH }}/values.yaml"
+
+          echo ""
+          echo "================ Source ingress.yaml ================"
+          grep -n "ingressClassName" "${{ env.HELM_CHART_PATH }}/templates/ingress.yaml" || true
+
           rm -rf deploy-pkg deploy-artifacts.tar.gz
+
           mkdir -p deploy-pkg
+
           cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
+
+          echo ""
+          echo "================ Packaged values.yaml ================"
+          grep -n "className\|type:" deploy-pkg/employee-management-system/values.yaml
+
+          echo ""
           echo "===== Files being packaged ====="
           find deploy-pkg -type f | sort
+
           tar -czf deploy-artifacts.tar.gz deploy-pkg/
+
           echo "Helm chart prepared for deployment"
       
       - name: Verify packaged Helm chart
