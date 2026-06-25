@@ -44,7 +44,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ include "employee-management-system.secretName" . }}
-      key: postgres-username
+              key: postgres-username
         - name: SPRING_DATASOURCE_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -90,19 +90,19 @@ spec:
             drop:
               - ALL
         volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: cache
-          mountPath: /app/cache
+          - name: tmp
+            mountPath: /tmp
+          - name: cache
+            mountPath: /app/cache
       {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       {{- end }}
       volumes:
-      - name: tmp
-        emptyDir: {}
-      - name: cache
-        emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
