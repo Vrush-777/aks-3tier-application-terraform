@@ -333,7 +333,10 @@ jobs:
 
           echo ""
           echo "================ Helm Template ================"
-          helm template employee-management verify/deploy-pkg/employee-management-system
+          helm template employee-management \
+          verify/deploy-pkg/employee-management-system \
+          --debug \
+          --show-only templates/secret.yaml
  
       - name: Validate deploy.sh exists on Jump VM
         uses: azure/CLI@v1
@@ -560,20 +563,33 @@ jobs:
  
             # DEBUG 5: Verify deployment success
             # deploy.sh MUST print "DEPLOYMENT_STATUS=SUCCESS" on successful completion
-            if ! echo "${DEPLOY_MESSAGE}" | grep -q "DEPLOYMENT_STATUS=SUCCESS"; then
-              echo "❌ Deployment failed on Jump VM"
-              echo ""
-              echo "Deployment output did not contain success marker: DEPLOYMENT_STATUS=SUCCESS"
-              echo ""
-              echo "Full deployment output:"
-              echo "${DEPLOY_MESSAGE}"
-              exit 1
-            fi
- 
-            echo "✅ Deployment script executed successfully"
             echo ""
-            echo "Last 20 lines of deployment output:"
-            echo "${DEPLOY_MESSAGE}" | tail -20
+            echo "Verifying Helm release..."
+
+            VERIFY_OUTPUT=$(az vm run-command invoke \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${JUMP_VM_NAME}" \
+              --command-id RunShellScript \
+              --scripts "
+                helm status employee-management -n employee-management >/dev/null 2>&1
+
+                kubectl rollout status deployment/ems-backend -n employee-management --timeout=30s >/dev/null
+
+                kubectl rollout status deployment/ems-frontend -n employee-management --timeout=30s >/dev/null
+
+                kubectl rollout status statefulset/employee-management-postgresql -n employee-management --timeout=30s >/dev/null
+
+                echo SUCCESS
+              " \
+              --query 'value[0].message' \
+              --output tsv)
+
+            if ! echo "${VERIFY_OUTPUT}" | grep -q "SUCCESS"; then
+                echo "Deployment verification failed."
+                exit 1
+            fi
+
+            echo "Deployment verified successfully."
  
       # ========================================================================
       # FIX 2: Correct Verify Deployment Status implementation
