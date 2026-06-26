@@ -310,14 +310,15 @@ jobs:
           cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
 
           echo ""
-          echo "================ Packaged values.yaml ================"
-          grep -n "className" \
+          echo "================ Packaged PostgreSQL values ================"
+
+          grep -A15 "^postgresql:" \
           deploy-pkg/employee-management-system/values.yaml
 
-          grep -n "type:" \
-          deploy-pkg/employee-management-system/values.yaml
+          echo ""
+          echo "================ Packaged Secret Template ================"
 
-          grep -n "className\|type:" deploy-pkg/employee-management-system/values.yaml
+          cat deploy-pkg/employee-management-system/templates/secret.yaml
 
           echo ""
           echo "===== Files being packaged ====="
@@ -361,6 +362,20 @@ jobs:
           echo "================ Helm Dependency Build ================"
           helm dependency build verify/deploy-pkg/employee-management-system
 
+          echo ""
+          echo "================ Rendered Secret ================"
+
+          helm template employee-management \
+          verify/deploy-pkg/employee-management-system \
+          --show-only templates/secret.yaml
+
+          echo ""
+          echo "================ Rendered PostgreSQL Secret Reference ================"
+
+          helm template employee-management \
+          verify/deploy-pkg/employee-management-system \
+          | grep -A20 -B5 "existingSecret"
+          
           echo ""
           echo "================ Backend Deployment Render ================"
           helm template employee-management \
