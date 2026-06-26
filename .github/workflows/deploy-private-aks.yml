@@ -303,11 +303,27 @@ jobs:
           echo "================ Source ingress.yaml ================"
           grep -n "ingressClassName" "${{ env.HELM_CHART_PATH }}/templates/ingress.yaml" || true
 
+          echo ""
+          echo "================ Source values.yaml (Frontend) ================"
+          grep -A40 "frontend:" "${{ env.HELM_CHART_PATH }}/values.yaml"
+
+          echo ""
+          echo "================ Source values.yaml (Backend) ================"
+          grep -A40 "backend:" "${{ env.HELM_CHART_PATH }}/values.yaml"
+
           rm -rf deploy-pkg deploy-artifacts.tar.gz
 
           mkdir -p deploy-pkg
 
           cp -r "${{ env.HELM_CHART_PATH }}" deploy-pkg/
+
+          echo ""
+          echo "================ Packaged Frontend Values ================"
+          grep -A40 "^frontend:" deploy-pkg/employee-management-system/values.yaml
+
+          echo ""
+          echo "================ Packaged Backend Values ================"
+          grep -A40 "^backend:" deploy-pkg/employee-management-system/values.yaml
 
           echo ""
           echo "================ Packaged PostgreSQL values ================"
