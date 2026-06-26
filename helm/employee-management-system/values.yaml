@@ -149,6 +149,10 @@ postgresql:
     database: employee_db
     existingSecret: employee-management-db-secret
 
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+
   primary:
     persistence:
       enabled: true
