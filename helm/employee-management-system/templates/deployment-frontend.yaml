@@ -53,10 +53,8 @@ spec:
         resources:
           {{- toYaml .Values.frontend.resources | nindent 10 }}
         securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+          allowPrivilegeEscalation: false
+
       {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
