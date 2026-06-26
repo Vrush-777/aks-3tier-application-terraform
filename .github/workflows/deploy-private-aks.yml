@@ -326,6 +326,18 @@ jobs:
 
           tar -czf deploy-artifacts.tar.gz deploy-pkg/
 
+          echo ""
+          echo "================ VERIFY values.yaml ================"
+          grep -A15 "^postgresql:" deploy-pkg/employee-management-system/values.yaml
+
+          echo ""
+          echo "================ VERIFY Secret Template ================"
+          cat deploy-pkg/employee-management-system/templates/secret.yaml
+
+          echo ""
+          echo "================ HELM SHOW VALUES ================"
+          helm show values deploy-pkg/employee-management-system | grep -A15 "^postgresql:"
+
           echo "Helm chart prepared for deployment"
       
       - name: Verify packaged Helm chart
@@ -361,6 +373,12 @@ jobs:
           echo ""
           echo "================ Helm Dependency Build ================"
           helm dependency build verify/deploy-pkg/employee-management-system
+
+          echo ""
+          echo "================ VERIFY AFTER DEPENDENCY BUILD ================"
+
+          helm show values verify/deploy-pkg/employee-management-system \
+          | grep -A15 "^postgresql:"
 
           echo ""
           echo "================ Rendered Secret ================"
@@ -452,6 +470,25 @@ jobs:
       # Requires: deploy.sh prints "DEPLOYMENT_STATUS=SUCCESS" on successful completion
       # See: terraform/scripts/jumpvm-cloud-init.yaml - add after helm upgrade --install
       # ========================================================================
+      - name: Verify chart before deployment
+        run: |
+          mkdir verify-runtime
+
+          tar -xzf deploy-artifacts.tar.gz -C verify-runtime
+
+          helm dependency build verify-runtime/deploy-pkg/employee-management-system
+
+          echo "===== Secret Render ====="
+          helm template employee-management \
+            verify-runtime/deploy-pkg/employee-management-system \
+            --show-only templates/secret.yaml
+
+          echo ""
+          echo "===== Full Secret Search ====="
+          helm template employee-management \
+            verify-runtime/deploy-pkg/employee-management-system \
+            | grep -A20 "kind: Secret"
+      
       - name: Deploy via Jump VM - Run Command
         id: deploy
         uses: azure/CLI@v1
