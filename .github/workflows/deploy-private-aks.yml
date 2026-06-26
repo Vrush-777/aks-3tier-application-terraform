@@ -374,8 +374,8 @@ jobs:
 
           helm template employee-management \
           verify/deploy-pkg/employee-management-system \
-          | grep -A20 -B5 "existingSecret"
-          
+          | grep -A20 -B5 "existingSecret" || true
+
           echo ""
           echo "================ Backend Deployment Render ================"
           helm template employee-management \
