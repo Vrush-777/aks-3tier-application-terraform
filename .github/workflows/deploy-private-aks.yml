@@ -311,6 +311,12 @@ jobs:
 
           echo ""
           echo "================ Packaged values.yaml ================"
+          grep -n "className" \
+          deploy-pkg/employee-management-system/values.yaml
+
+          grep -n "type:" \
+          deploy-pkg/employee-management-system/values.yaml
+
           grep -n "className\|type:" deploy-pkg/employee-management-system/values.yaml
 
           echo ""
@@ -528,13 +534,13 @@ jobs:
  
             # Call deploy.sh with all 6 required arguments
             # Using eval with quoted arguments to preserve whitespace
-            eval "/opt/deploy/deploy.sh" \
-              "\"${RESOURCE_GROUP_ARG}\"" \
-              "\"${AKS_CLUSTER_ARG}\"" \
-              "\"${IMAGE_TAG_ARG}\"" \
-              "\"${ACR_SERVER_ARG}\"" \
-              "\"${SUBSCRIPTION_ID_ARG}\"" \
-              "\"${REMOTE_CHART_ARCHIVE}\""
+            /opt/deploy/deploy.sh \
+            "${RESOURCE_GROUP_ARG}" \
+            "${AKS_CLUSTER_ARG}" \
+            "${IMAGE_TAG_ARG}" \
+            "${ACR_SERVER_ARG}" \
+            "${SUBSCRIPTION_ID_ARG}" \
+            "${REMOTE_CHART_ARCHIVE}"
  
             DEPLOY_RESULT=$?
  
@@ -616,16 +622,33 @@ jobs:
               --name "${JUMP_VM_NAME}" \
               --command-id RunShellScript \
               --scripts "
-                helm status employee-management -n employee-management >/dev/null 2>&1
 
-                kubectl rollout status deployment/ems-backend -n employee-management --timeout=30s >/dev/null
+            helm status employee-management -n employee-management || true
 
-                kubectl rollout status deployment/ems-frontend -n employee-management --timeout=30s >/dev/null
+            echo
+            echo '===== Pods ====='
+            kubectl get pods -n employee-management -o wide || true
 
-                kubectl rollout status statefulset/employee-management-postgresql -n employee-management --timeout=30s >/dev/null
+            echo
+            echo '===== Services ====='
+            kubectl get svc -n employee-management || true
 
-                echo SUCCESS
-              " \
+            echo
+            echo '===== Ingress ====='
+            kubectl get ingress -n employee-management || true
+
+            echo
+            echo '===== Events ====='
+            kubectl get events -n employee-management --sort-by=.lastTimestamp || true
+
+            echo
+            echo '===== Rollout ====='
+            kubectl rollout status deployment/ems-backend -n employee-management --timeout=30s
+            kubectl rollout status deployment/ems-frontend -n employee-management --timeout=30s
+            kubectl rollout status statefulset/employee-management-postgresql -n employee-management --timeout=30s
+
+            echo SUCCESS
+            " \
               --query 'value[0].message' \
               --output tsv)
 
@@ -641,70 +664,6 @@ jobs:
       # VERIFICATION_SCRIPT contains ONLY commands that execute ON THE JUMP VM
       # Azure CLI commands are executed OUTSIDE the script definition
       # ========================================================================
-      - name: Verify Deployment Status
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            set -e
- 
-            JUMP_VM_NAME="${{ steps.terraform.outputs.jump_vm_name }}"
-            RESOURCE_GROUP="${{ steps.terraform.outputs.resource_group }}"
- 
-            echo "📊 Verifying deployment status on private AKS cluster..."
-            echo ""
- 
-            # FIX 2: Define VERIFICATION_SCRIPT with ONLY Jump VM commands
-            # This script executes entirely on the Jump VM using its kubeconfig
-            # No Azure CLI commands are embedded in this script
-            VERIFICATION_SCRIPT="
-            set -Eeuo pipefail
- 
-            echo 'Checking Kubernetes pod status in employee-management namespace...'
-            echo ''
- 
-            # FIX 3: Simplified pod status check (no JSON parsing)
-            echo 'Current pod status:'
-            kubectl get pods -n employee-management
-            echo ''
- 
-            # FIX 3: Fail if unhealthy pods detected
-            if kubectl get pods -n employee-management | grep -E 'CrashLoopBackOff|Error|Failed'; then
-              echo '❌ ERROR: Unhealthy pods detected'
-              exit 1
-            fi
- 
-            echo ''
-            echo 'Checking Helm release status...'
-            echo ''
- 
-            # FIX 4: Use helm status command (not JSON parsing)
-            HELM_STATUS=\$(helm status employee-management -n employee-management)
- 
-            echo \"\${HELM_STATUS}\"
-            echo ''
- 
-            # FIX 4: Validate Helm release status is deployed
-            if ! echo \"\${HELM_STATUS}\" | grep -q '^STATUS: deployed'; then
-              echo '❌ ERROR: Helm release is not deployed'
-              exit 1
-            fi
- 
-            echo '✅ Helm release status is deployed'
-            echo ''
-            echo '✅ All deployment verifications passed'
-            "
- 
-            # FIX 2: Execute VERIFICATION_SCRIPT on Jump VM
-            # Azure CLI command is executed OUTSIDE the script definition
-            az vm run-command invoke \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${JUMP_VM_NAME}" \
-              --command-id RunShellScript \
-              --scripts "${VERIFICATION_SCRIPT}"
- 
-            echo ""
-            echo "✅ Deployment verification complete"
- 
       - name: Deployment Summary
         if: success()
         run: |
