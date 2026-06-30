@@ -25,6 +25,11 @@ frontend:
   name: ems-frontend
   replicaCount: 2
 
+  securityContext:
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+
   image:
     repository: "ems-frontend"
     pullPolicy: IfNotPresent
@@ -71,6 +76,11 @@ backend:
   enabled: true
   name: ems-backend
   replicaCount: 2
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
 
   image:
     repository: "ems-backend"

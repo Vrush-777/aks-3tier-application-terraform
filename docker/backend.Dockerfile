@@ -41,7 +41,7 @@ COPY --from=maven-builder /build/target/*.jar app.jar
 RUN chown -R appuser:appgroup /app
 
 # Switch to non-root user
-USER 1000
+USER 1000:1000
 
 # Expose Spring Boot server port
 EXPOSE 8080
