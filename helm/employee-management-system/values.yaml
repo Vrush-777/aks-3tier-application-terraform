@@ -32,8 +32,8 @@ frontend:
 
   image:
     repository: "ems-frontend"
-    pullPolicy: IfNotPresent
-    tag: "latest"
+    pullPolicy: Always
+    tag: "$(Build.BuildId)"
 
   service:
     type: ClusterIP
@@ -84,8 +84,8 @@ backend:
 
   image:
     repository: "ems-backend"
-    pullPolicy: IfNotPresent
-    tag: "latest"
+    pullPolicy: Always
+    tag: "$(Build.BuildId)"
 
   service:
     type: ClusterIP
