@@ -23,7 +23,7 @@ registry:
 frontend:
   enabled: true
   name: ems-frontend
-  replicaCount: 2
+  replicaCount: 4
 
   securityContext:
     runAsUser: 101
