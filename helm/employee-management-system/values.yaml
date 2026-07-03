@@ -23,7 +23,7 @@ registry:
 frontend:
   enabled: true
   name: ems-frontend
-  replicaCount: 4
+  replicaCount: 2
 
   securityContext:
     runAsUser: 101
@@ -62,8 +62,8 @@ frontend:
 
   autoscaling:
     enabled: true
-    minReplicas: 2
-    maxReplicas: 5
+    minReplicas: 4
+    maxReplicas: 6
     targetCPUUtilizationPercentage: 80
     targetMemoryUtilizationPercentage: 80
 
